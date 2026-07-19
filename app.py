@@ -1216,6 +1216,44 @@ def admin_users():
         'is_admin': u['is_admin']
     } for u in users])
 
+@app.route('/api/admin/messages')
+def admin_messages():
+    if 'user_id' not in session or not session.get('is_admin'):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    conn = get_db()
+    cursor = conn.cursor()
+    # Deliberately selects exactly what's stored on disk, unmodified, so it can
+    # be shown as proof of encryption-at-rest: ciphertext, nonce, and a
+    # non-secret version tag only -- never plaintext, because plaintext is
+    # never written to this table in the first place.
+    cursor.execute("""
+        SELECT m.id, m.sender_id, su.username AS sender_name,
+               m.receiver_id, ru.username AS receiver_name,
+               m.encrypted_content, m.nonce, m.salt,
+               m.message_type, m.timestamp
+        FROM messages m
+        JOIN users su ON su.id = m.sender_id
+        JOIN users ru ON ru.id = m.receiver_id
+        ORDER BY m.timestamp DESC
+        LIMIT 100
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    return jsonify([{
+        'id': r['id'],
+        'sender_id': r['sender_id'],
+        'sender_name': r['sender_name'],
+        'receiver_id': r['receiver_id'],
+        'receiver_name': r['receiver_name'],
+        'encrypted_content': r['encrypted_content'],
+        'nonce': r['nonce'],
+        'salt': r['salt'],
+        'message_type': r['message_type'],
+        'timestamp': r['timestamp']
+    } for r in rows])
+
 # ==================== MAIN ====================
 # Initialize the database at import time so it runs no matter how the app is
 # started (python app.py directly, OR via gunicorn/Procfile/Dockerfile).

@@ -49,6 +49,9 @@
     .muted { color: var(--text-muted); font-size: 13px; }
     .loading, .error { padding: 40px; text-align: center; color: var(--text-muted); }
     .note { margin-top: 20px; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+    .ciphertext { font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; color: #e879f9; background: rgba(232,121,249,0.08); padding: 6px 10px; border-radius: 6px; display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+    .msg-flow { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+    .msg-flow b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -71,6 +74,16 @@
         <div class="panel-header">Registered Users</div>
         <div id="usersTableWrap">
             <div class="loading">Loading users…</div>
+        </div>
+    </div>
+
+    <div class="panel" style="margin-top: 24px;">
+        <div class="panel-header">
+            Live Database — Messages Table (raw, as stored on disk)
+            <div class="muted" style="margin-top:4px; font-weight:400;">This is exactly what's in SQLite. No message content column exists — only ciphertext, a nonce, and a version tag. There is nothing to decrypt without the recipient's PIN.</div>
+        </div>
+        <div id="messagesTableWrap">
+            <div class="loading">Loading messages…</div>
         </div>
     </div>
 
@@ -131,7 +144,41 @@ async function loadUsers() {
 
 loadStats();
 loadUsers();
+loadMessages();
 setInterval(loadStats, 15000);
+setInterval(loadMessages, 15000);
+
+async function loadMessages() {
+    try {
+        const res = await fetch('/api/admin/messages');
+        if (!res.ok) throw new Error('unauthorized');
+        const msgs = await res.json();
+        if (!msgs.length) {
+            document.getElementById('messagesTableWrap').innerHTML = '<div class="loading">No messages yet. Send one from two accounts, then refresh this page.</div>';
+            return;
+        }
+        const rows = msgs.map(m => `
+            <tr>
+                <td>#${m.id}</td>
+                <td class="msg-flow"><b>${m.sender_name}</b> → <b>${m.receiver_name}</b></td>
+                <td><span class="ciphertext" title="${(m.encrypted_content || '').replace(/"/g, '&quot;')}">${m.encrypted_content ? m.encrypted_content.slice(0, 40) + '…' : '(no text — file message)'}</span></td>
+                <td><span class="ciphertext" title="${m.nonce || ''}">${m.nonce || '—'}</span></td>
+                <td class="muted">${m.message_type}</td>
+                <td class="muted">${new Date(m.timestamp).toLocaleString()}</td>
+            </tr>
+        `).join('');
+        document.getElementById('messagesTableWrap').innerHTML = `
+            <table>
+                <thead>
+                    <tr><th>ID</th><th>Conversation</th><th>encrypted_content (ciphertext)</th><th>nonce</th><th>Type</th><th>Timestamp</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch (e) {
+        document.getElementById('messagesTableWrap').innerHTML = '<div class="error">Could not load messages (are you logged in as an admin?)</div>';
+    }
+}
 </script>
 </body>
 </html>
