@@ -594,6 +594,7 @@ def get_messages(contact_id):
         msg_dict = {
             'id': m['id'],
             'sender_id': m['sender_id'],
+            'receiver_id': m['receiver_id'],
             'sender_name': m['sender_display'] or m['sender_name'],
             'encrypted_content': m['encrypted_content'],
             'nonce': m['nonce'],
