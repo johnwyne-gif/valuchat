@@ -426,7 +426,10 @@
             modal.id = 'pinModal';
             modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
             modal.innerHTML = `
-                <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:40px;width:100%;max-width:380px;box-shadow:var(--glow);text-align:center;">
+                <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:40px;width:100%;max-width:380px;box-shadow:var(--glow);text-align:center;">
+                    ${!isFirstTime ? `
+                    <button id="pinModalClose" title="Skip for now" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:none;background:var(--bg-card);color:var(--text-muted);font-size:16px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;" onmouseover="this.style.background='var(--border)'" onmouseout="this.style.background='var(--bg-card)'">✕</button>
+                    ` : ''}
                     <div style="font-size:48px;margin-bottom:16px;">🔐</div>
                     <h2 style="font-size:24px;font-weight:800;margin-bottom:8px;">${isFirstTime ? 'Set Your PIN' : 'Enter Your PIN'}</h2>
                     <p style="color:var(--text-muted);font-size:14px;margin-bottom:24px;line-height:1.5;">
@@ -479,6 +482,42 @@
             }
 
             submitBtn.addEventListener('click', () => submitPin(isFirstTime));
+
+            const closeBtn = document.getElementById('pinModalClose');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    modal.remove();
+                    showRestoreHistoryIcon();
+                });
+            }
+        }
+
+        // ============================================
+        // FLOATING "RESTORE CHAT HISTORY" ICON
+        // ============================================
+        // Shown after the user dismisses the PIN prompt with the X, so they
+        // can still bring the PIN modal back later and unlock messages
+        // whenever they're ready, instead of being forced to enter it now.
+        function showRestoreHistoryIcon() {
+            if (pinVerified) return; // already unlocked, no need for the icon
+            if (document.getElementById('restoreHistoryBtn')) return;
+
+            const btn = document.createElement('button');
+            btn.id = 'restoreHistoryBtn';
+            btn.title = 'Restore your encrypted chat history';
+            btn.style.cssText = 'position:fixed;top:16px;left:16px;z-index:4000;width:48px;height:48px;border-radius:50%;border:none;background:var(--gradient);color:#fff;font-size:20px;cursor:pointer;box-shadow:0 4px 20px rgba(168,85,247,0.4);display:flex;align-items:center;justify-content:center;transition:transform 0.2s;';
+            btn.innerHTML = '🔒';
+            btn.onmouseover = () => btn.style.transform = 'scale(1.08)';
+            btn.onmouseout = () => btn.style.transform = 'scale(1)';
+            btn.addEventListener('click', () => {
+                showPinModal(false);
+            });
+            document.body.appendChild(btn);
+        }
+
+        function hideRestoreHistoryIcon() {
+            const btn = document.getElementById('restoreHistoryBtn');
+            if (btn) btn.remove();
         }
 
         async function submitPin(isFirstTime) {
@@ -534,6 +573,7 @@
                 // Remove modal
                 const modal = document.getElementById('pinModal');
                 if (modal) modal.remove();
+                hideRestoreHistoryIcon();
 
                 // Now derive all conversation keys and load messages
                 await restoreAllConversationKeys();
