@@ -1213,6 +1213,12 @@ def admin_users():
     } for u in users])
 
 # ==================== MAIN ====================
+# Initialize the database at import time so it runs no matter how the app is
+# started (python app.py directly, OR via gunicorn/Procfile/Dockerfile).
+# `if __name__ == '__main__'` alone only fires for direct execution, and
+# gunicorn imports this file as a module instead, so it would otherwise skip
+# table creation entirely and every DB write would fail with a 500 error.
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
