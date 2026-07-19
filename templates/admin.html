@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ValuChat — Admin Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --bg: #0f0518;
+        --bg-elevated: #1a0b2e;
+        --bg-card: #241038;
+        --bg-hover: #2d1648;
+        --text: #f3e8ff;
+        --text-muted: #c4b5fd;
+        --text-dim: #8b5cf6;
+        --border: rgba(168,85,247,0.15);
+        --border-hover: rgba(168,85,247,0.3);
+        --gradient: linear-gradient(135deg, #a855f7, #e879f9);
+        --glow: 0 0 40px rgba(168,85,247,0.2);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 32px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
+    .title { display: flex; align-items: center; gap: 14px; }
+    .title-icon { width: 44px; height: 44px; background: var(--gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: var(--glow); }
+    .title h1 { font-size: 22px; font-weight: 800; }
+    .title p { font-size: 13px; color: var(--text-muted); }
+    .back-link { color: var(--text-muted); text-decoration: none; font-size: 14px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; transition: all 0.2s; }
+    .back-link:hover { background: var(--bg-card); border-color: var(--border-hover); }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .stat-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+    .stat-value { font-size: 30px; font-weight: 800; background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .stat-label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    .panel { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .panel-header { padding: 18px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 15px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 12px 20px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+    td { padding: 14px 20px; font-size: 14px; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg-hover); }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge.online { background: rgba(34,197,94,0.15); color: #4ade80; }
+    .badge.offline { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+    .badge.admin { background: rgba(232,121,249,0.15); color: #e879f9; margin-left: 6px; }
+    .muted { color: var(--text-muted); font-size: 13px; }
+    .loading, .error { padding: 40px; text-align: center; color: var(--text-muted); }
+    .note { margin-top: 20px; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">
+            <div class="title-icon">🛡️</div>
+            <div>
+                <h1>Admin Dashboard</h1>
+                <p>Server-side metadata only — message content is never decrypted or visible here</p>
+            </div>
+        </div>
+        <a href="/chat" class="back-link">← Back to Chat</a>
+    </div>
+
+    <div class="stats-grid" id="statsGrid">
+        <div class="loading">Loading stats…</div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">Registered Users</div>
+        <div id="usersTableWrap">
+            <div class="loading">Loading users…</div>
+        </div>
+    </div>
+
+    <p class="note">Note: this dashboard reads only account and delivery metadata (usernames, timestamps, online status) directly from the database. It has no way to show message text — the server never has the decryption key, so there is nothing here to decrypt.</p>
+
+<script>
+async function loadStats() {
+    try {
+        const res = await fetch('/api/admin/stats');
+        if (!res.ok) throw new Error('unauthorized');
+        const s = await res.json();
+        document.getElementById('statsGrid').innerHTML = `
+            <div class="stat-card"><div class="stat-value">${s.total_users}</div><div class="stat-label">Total Users</div></div>
+            <div class="stat-card"><div class="stat-value">${s.online_users}</div><div class="stat-label">Online Now</div></div>
+            <div class="stat-card"><div class="stat-value">${s.total_messages}</div><div class="stat-label">Total Messages</div></div>
+            <div class="stat-card"><div class="stat-value">${s.today_messages}</div><div class="stat-label">Messages Today</div></div>
+            <div class="stat-card"><div class="stat-value">${s.failed_logins}</div><div class="stat-label">Failed Logins Today</div></div>
+        `;
+    } catch (e) {
+        document.getElementById('statsGrid').innerHTML = '<div class="error">Could not load stats (are you logged in as an admin?)</div>';
+    }
+}
+
+async function loadUsers() {
+    try {
+        const res = await fetch('/api/admin/users');
+        if (!res.ok) throw new Error('unauthorized');
+        const users = await res.json();
+        if (!users.length) {
+            document.getElementById('usersTableWrap').innerHTML = '<div class="loading">No users yet.</div>';
+            return;
+        }
+        const rows = users.map(u => `
+            <tr>
+                <td>#${u.id}</td>
+                <td>${u.display_name || u.username}<div class="muted">@${u.username}</div></td>
+                <td>${u.email}</td>
+                <td>
+                    <span class="badge ${u.status === 'online' ? 'online' : 'offline'}">${u.status || 'offline'}</span>
+                    ${u.is_admin ? '<span class="badge admin">admin</span>' : ''}
+                </td>
+                <td class="muted">${u.last_seen ? new Date(u.last_seen).toLocaleString() : '—'}</td>
+                <td class="muted">${u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</td>
+            </tr>
+        `).join('');
+        document.getElementById('usersTableWrap').innerHTML = `
+            <table>
+                <thead>
+                    <tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th><th>Last Seen</th><th>Joined</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch (e) {
+        document.getElementById('usersTableWrap').innerHTML = '<div class="error">Could not load users (are you logged in as an admin?)</div>';
+    }
+}
+
+loadStats();
+loadUsers();
+setInterval(loadStats, 15000);
+</script>
+</body>
+</html>

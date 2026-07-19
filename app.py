@@ -285,7 +285,10 @@ def init_db():
     # Create default admin with random password if not exists
     cursor.execute("SELECT id FROM users WHERE username = 'admin'")
     if not cursor.fetchone():
-        admin_password = secrets.token_urlsafe(16)
+        # If ADMIN_PASSWORD is set as an environment variable, use it so you
+        # can reliably log in as admin (e.g. before a live demo/presentation).
+        # Otherwise fall back to a random one-time password printed to the logs.
+        admin_password = os.environ.get('ADMIN_PASSWORD') or secrets.token_urlsafe(16)
         admin_hash = generate_password_hash(admin_password)
         cursor.execute("""
             INSERT INTO users (username, email, password_hash, display_name, is_admin)
