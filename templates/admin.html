@@ -6,6 +6,7 @@
 <title>ValuChat — Admin Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
 <style>
     :root {
         --bg: #0f0518;
@@ -52,6 +53,15 @@
     .ciphertext { font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; color: #e879f9; background: rgba(232,121,249,0.08); padding: 6px 10px; border-radius: 6px; display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .msg-flow { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
     .msg-flow b { color: var(--text); }
+
+    .live-banner { display: flex; align-items: center; gap: 10px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 12px; padding: 12px 18px; margin-bottom: 24px; font-size: 14px; }
+    .live-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.5s infinite; flex-shrink: 0; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .live-banner.disconnected { background: rgba(244,114,182,0.1); border-color: rgba(244,114,182,0.3); }
+    .live-banner.disconnected .live-dot { background: #f472b6; box-shadow: 0 0 8px #f472b6; animation: none; }
+
+    @keyframes flashNew { 0% { background: rgba(34,197,94,0.35); } 100% { background: transparent; } }
+    tr.flash-new td { animation: flashNew 2.5s ease; }
 </style>
 </head>
 <body>
@@ -64,6 +74,11 @@
             </div>
         </div>
         <a href="/chat" class="back-link">← Back to Chat</a>
+    </div>
+
+    <div class="live-banner disconnected" id="liveBanner">
+        <div class="live-dot"></div>
+        <span id="liveBannerText">Connecting to live feed…</span>
     </div>
 
     <div class="stats-grid" id="statsGrid">
@@ -146,7 +161,54 @@ loadStats();
 loadUsers();
 loadMessages();
 setInterval(loadStats, 15000);
-setInterval(loadMessages, 15000);
+
+// ============================================
+// LIVE FEED — real-time proof of encryption
+// ============================================
+// Connects as this (admin) user's socket session; the server puts admins in
+// a dedicated 'admin_room' and pushes the exact ciphertext row the instant
+// any message is sent anywhere in the system.
+const socket = io();
+const liveBanner = document.getElementById('liveBanner');
+const liveBannerText = document.getElementById('liveBannerText');
+
+socket.on('connect', () => {
+    liveBanner.classList.remove('disconnected');
+    liveBannerText.textContent = 'Live — watching the database in real time. Send a message from any two accounts and it will appear below instantly, as ciphertext.';
+});
+
+socket.on('disconnect', () => {
+    liveBanner.classList.add('disconnected');
+    liveBannerText.textContent = 'Disconnected from live feed — reconnecting…';
+});
+
+socket.on('admin_new_message', (m) => {
+    prependLiveMessageRow(m);
+    loadStats(); // refresh counters immediately too
+});
+
+function ciphertextCell(text, title) {
+    const safe = (title || '').replace(/"/g, '&quot;');
+    const preview = text ? text.slice(0, 40) + '…' : '(no text — file message)';
+    return `<span class="ciphertext" title="${safe}">${preview}</span>`;
+}
+
+function prependLiveMessageRow(m) {
+    const tbody = document.querySelector('#messagesTableWrap tbody');
+    if (!tbody) { loadMessages(); return; } // table not built yet, just do a full load
+    const tr = document.createElement('tr');
+    tr.className = 'flash-new';
+    tr.innerHTML = `
+        <td>#${m.id}</td>
+        <td class="msg-flow"><b>${m.sender_name}</b> → <b>${m.receiver_name}</b></td>
+        <td>${ciphertextCell(m.encrypted_content, m.encrypted_content)}</td>
+        <td>${ciphertextCell(m.nonce, m.nonce)}</td>
+        <td class="muted">${m.message_type}</td>
+        <td class="muted">${new Date(m.timestamp).toLocaleString()}</td>
+    `;
+    tbody.insertBefore(tr, tbody.firstChild);
+    setTimeout(() => tr.classList.remove('flash-new'), 2600);
+}
 
 async function loadMessages() {
     try {
@@ -154,15 +216,15 @@ async function loadMessages() {
         if (!res.ok) throw new Error('unauthorized');
         const msgs = await res.json();
         if (!msgs.length) {
-            document.getElementById('messagesTableWrap').innerHTML = '<div class="loading">No messages yet. Send one from two accounts, then refresh this page.</div>';
+            document.getElementById('messagesTableWrap').innerHTML = '<div class="loading">No messages yet. Send one from two accounts — it will appear here live.</div>';
             return;
         }
         const rows = msgs.map(m => `
             <tr>
                 <td>#${m.id}</td>
                 <td class="msg-flow"><b>${m.sender_name}</b> → <b>${m.receiver_name}</b></td>
-                <td><span class="ciphertext" title="${(m.encrypted_content || '').replace(/"/g, '&quot;')}">${m.encrypted_content ? m.encrypted_content.slice(0, 40) + '…' : '(no text — file message)'}</span></td>
-                <td><span class="ciphertext" title="${m.nonce || ''}">${m.nonce || '—'}</span></td>
+                <td>${ciphertextCell(m.encrypted_content, m.encrypted_content)}</td>
+                <td>${ciphertextCell(m.nonce, m.nonce)}</td>
                 <td class="muted">${m.message_type}</td>
                 <td class="muted">${new Date(m.timestamp).toLocaleString()}</td>
             </tr>

@@ -636,6 +636,8 @@ def handle_connect(auth=None):
     if 'user_id' in session:
         user_id = session['user_id']
         join_room(f"user_{user_id}")
+        if session.get('is_admin'):
+            join_room('admin_room')
 
         # Mark user as online in DB
         conn = get_db()
@@ -755,6 +757,27 @@ def handle_send_message(data):
 
         socketio.emit('new_message', message_data, room=f"user_{receiver_id}")
         emit('message_sent', message_data)
+
+        # Live feed for the admin dashboard: broadcast the exact ciphertext
+        # row just written to disk, so an instructor watching /admin sees it
+        # appear in real time as proof of encryption-at-rest.
+        conn2 = get_db()
+        cursor2 = conn2.cursor()
+        cursor2.execute("SELECT username, display_name FROM users WHERE id = ?", (receiver_id,))
+        receiver = cursor2.fetchone()
+        conn2.close()
+        socketio.emit('admin_new_message', {
+            'id': message_id,
+            'sender_id': session['user_id'],
+            'sender_name': sender['display_name'] or sender['username'],
+            'receiver_id': receiver_id,
+            'receiver_name': (receiver['display_name'] or receiver['username']) if receiver else f"user_{receiver_id}",
+            'encrypted_content': encrypted_content,
+            'nonce': nonce,
+            'salt': salt,
+            'message_type': 'text',
+            'timestamp': datetime.now().isoformat()
+        }, room='admin_room')
     else:
         cursor.execute("""
             INSERT INTO message_requests (sender_id, receiver_id, encrypted_content, nonce, salt)
