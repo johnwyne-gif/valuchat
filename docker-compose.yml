@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  valuchat:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - FLASK_ENV=production
+    env_file:
+      - .env
+    volumes:
+      - ./database:/app/database
+      - ./static/uploads:/app/static/uploads
+    restart: unless-stopped

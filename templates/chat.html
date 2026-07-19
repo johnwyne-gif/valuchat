@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat - ValuChat</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        :root {
+            --primary: #a855f7;
+            --primary-light: #c084fc;
+            --primary-dark: #7c3aed;
+            --accent: #e879f9;
+            --accent-warm: #f472b6;
+            --bg: #0f0518;
+            --bg-elevated: #1a0b2e;
+            --bg-card: #241038;
+            --bg-hover: #2d1648;
+            --text: #f3e8ff;
+            --text-muted: #c4b5fd;
+            --text-dim: #8b5cf6;
+            --border: rgba(168,85,247,0.15);
+            --border-hover: rgba(168,85,247,0.3);
+            --gradient: linear-gradient(135deg, #a855f7, #e879f9);
+            --glow: 0 0 40px rgba(168,85,247,0.2);
+            --shadow: 0 4px 20px rgba(168,85,247,0.15);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+
+        .app { display: flex; height: 100vh; }
+
+        /* Sidebar */
+        .sidebar { width: 320px; background: var(--bg-elevated); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
+        .user-info { display: flex; align-items: center; gap: 12px; }
+        .user-avatar { width: 44px; height: 44px; background: var(--gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; box-shadow: 0 0 15px rgba(168,85,247,0.3); }
+        .user-details h3 { font-size: 15px; font-weight: 700; }
+        .user-details span { font-size: 12px; color: var(--primary-light); display: flex; align-items: center; gap: 4px; }
+        .user-details span::before { content: ''; width: 6px; height: 6px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 8px rgba(168,85,247,0.5); }
+
+        .search-box { padding: 12px 16px; }
+        .search-box input { width: 100%; padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-family: 'Inter', sans-serif; transition: all 0.3s; }
+        .search-box input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 10px rgba(168,85,247,0.1); }
+        .search-box input::placeholder { color: var(--text-dim); }
+
+        /* Tabs */
+        .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); }
+        .sidebar-tab { flex: 1; padding: 12px; text-align: center; font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; transition: all 0.2s; position: relative; }
+        .sidebar-tab:hover { color: var(--text-muted); }
+        .sidebar-tab.active { color: var(--primary-light); }
+        .sidebar-tab.active::after { content: ''; position: absolute; bottom: 0; left: 20%; right: 20%; height: 2px; background: var(--gradient); border-radius: 1px; }
+        .sidebar-tab .badge { display: inline-block; background: var(--accent-warm); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 4px; font-weight: 700; }
+
+        .contacts-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .contacts-list::-webkit-scrollbar { width: 4px; }
+        .contacts-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .contact-item { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; cursor: pointer; transition: all 0.2s; margin-bottom: 4px; position: relative; }
+        .contact-item:hover { background: var(--bg-hover); }
+        .contact-item.active { background: rgba(168,85,247,0.1); border: 1px solid var(--border-hover); }
+        .contact-item.unread::after { content: ''; position: absolute; top: 12px; right: 12px; width: 8px; height: 8px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px rgba(232,121,249,0.5); }
+        .contact-avatar { width: 44px; height: 44px; background: linear-gradient(135deg, #7c3aed, #a855f7); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: #fff; flex-shrink: 0; }
+        .contact-info { flex: 1; min-width: 0; }
+        .contact-info h4 { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .contact-info p { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+        .contact-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .status-online { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+        .status-offline { background: var(--text-dim); }
+        .status-away { background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.5); }
+
+        .request-item { display: flex; align-items: center; gap: 12px; padding: 14px 12px; border-radius: 12px; margin-bottom: 6px; background: var(--bg-card); border: 1px solid var(--border); transition: all 0.2s; }
+        .request-item:hover { border-color: var(--border-hover); }
+        .request-actions { display: flex; gap: 8px; margin-left: auto; }
+        .request-btn { padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+        .btn-accept { background: var(--gradient); color: #fff; }
+        .btn-accept:hover { box-shadow: 0 4px 15px rgba(168,85,247,0.4); }
+        .btn-decline { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border); }
+        .btn-decline:hover { background: rgba(244,114,182,0.1); color: var(--accent-warm); border-color: rgba(244,114,182,0.3); }
+        .btn-block { background: rgba(244,114,182,0.1); color: var(--accent-warm); border: 1px solid rgba(244,114,182,0.2); }
+        .btn-block:hover { background: rgba(244,114,182,0.2); }
+
+        .add-contact-btn { margin: 12px 16px; padding: 10px; background: rgba(168,85,247,0.08); border: 1px dashed var(--border-hover); border-radius: 10px; color: var(--primary-light); font-size: 13px; font-weight: 600; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .add-contact-btn:hover { background: rgba(168,85,247,0.15); border-color: var(--primary); }
+
+        .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
+        .sidebar-footer a { display: flex; align-items: center; gap: 8px; color: var(--accent-warm); text-decoration: none; font-size: 13px; font-weight: 600; padding: 8px; border-radius: 8px; transition: background 0.2s; }
+        .sidebar-footer a:hover { background: rgba(244,114,182,0.1); }
+
+        /* Chat Area */
+        .chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg); }
+
+        .chat-header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+        .chat-header .contact-avatar { width: 40px; height: 40px; border-radius: 10px; }
+        .chat-header-info h3 { font-size: 15px; font-weight: 700; }
+        .chat-header-info p { font-size: 12px; color: var(--primary-light); display: flex; align-items: center; gap: 4px; }
+        .chat-header-info p.typing { color: var(--accent); }
+        .chat-header-info p .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .chat-header-info p .status-dot.online { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
+        .chat-header-info p .status-dot.offline { background: var(--text-dim); }
+        .encrypted-indicator { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--primary-light); background: rgba(168,85,247,0.08); padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); }
+
+        .messages-container { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+        .messages-container::-webkit-scrollbar { width: 6px; }
+        .messages-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .message { max-width: 70%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.5; word-wrap: break-word; animation: messageIn 0.3s ease; }
+        @keyframes messageIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .message-sent { align-self: flex-end; background: var(--gradient); color: #fff; border-radius: 16px 16px 4px 16px; box-shadow: var(--shadow); }
+        .message-received { align-self: flex-start; background: var(--bg-card); color: var(--text-muted); border-radius: 16px 16px 16px 4px; border: 1px solid var(--border); }
+        .message-time { font-size: 10px; opacity: 0.7; margin-top: 4px; text-align: right; }
+        .message-received .message-time { text-align: left; }
+        .message-error { align-self: center; background: rgba(244,114,182,0.1); color: var(--accent-warm); padding: 8px 16px; border-radius: 10px; font-size: 12px; border: 1px solid rgba(244,114,182,0.2); }
+
+        /* File attachments in messages */
+        .message-file { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(0,0,0,0.2); border-radius: 10px; margin-top: 6px; cursor: pointer; transition: all 0.2s; text-decoration: none; color: inherit; }
+        .message-file:hover { background: rgba(0,0,0,0.3); }
+        .message-file-icon { font-size: 24px; }
+        .message-file-info { flex: 1; min-width: 0; }
+        .message-file-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .message-file-size { font-size: 11px; opacity: 0.7; }
+        .message-image { max-width: 280px; max-height: 200px; border-radius: 10px; margin-top: 6px; cursor: pointer; transition: transform 0.2s; }
+        .message-image:hover { transform: scale(1.02); }
+
+        .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-dim); }
+        .empty-state-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.3; }
+        .empty-state h3 { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: var(--text-muted); }
+        .empty-state p { font-size: 14px; }
+
+        .chat-input-area { padding: 16px 24px; border-top: 1px solid var(--border); }
+        .chat-input-wrapper { display: flex; gap: 12px; align-items: flex-end; }
+        .chat-input { flex: 1; padding: 12px 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; color: var(--text); font-size: 14px; font-family: 'Inter', sans-serif; resize: none; outline: none; transition: all 0.3s; min-height: 44px; max-height: 120px; }
+        .chat-input:focus { border-color: var(--primary); box-shadow: 0 0 15px rgba(168,85,247,0.1); }
+        .chat-input::placeholder { color: var(--text-dim); }
+
+        .input-actions { display: flex; gap: 8px; align-items: center; }
+        .attach-btn { width: 40px; height: 40px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 18px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
+        .attach-btn:hover { background: rgba(168,85,247,0.1); border-color: var(--primary); color: var(--primary-light); }
+        .send-btn { width: 44px; height: 44px; background: var(--gradient); border: none; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; box-shadow: var(--shadow); }
+        .send-btn:hover { transform: scale(1.05); box-shadow: 0 6px 25px rgba(168,85,247,0.4); }
+        .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        /* File upload preview */
+        .file-preview { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; }
+        .file-preview img { max-height: 60px; max-width: 60px; border-radius: 6px; object-fit: cover; }
+        .file-preview-info { flex: 1; }
+        .file-preview-name { font-size: 13px; font-weight: 600; }
+        .file-preview-size { font-size: 11px; color: var(--text-dim); }
+        .file-preview-remove { background: none; border: none; color: var(--accent-warm); font-size: 18px; cursor: pointer; padding: 4px; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(5px); }
+        .modal-overlay.active { display: flex; }
+        .modal { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 20px; padding: 32px; width: 100%; max-width: 450px; box-shadow: var(--glow); position: relative; }
+        .modal h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+        .modal p { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+        .modal-close { position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--text-dim); font-size: 24px; cursor: pointer; }
+        .search-results { margin-top: 16px; max-height: 250px; overflow-y: auto; }
+        .search-result-item { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; cursor: pointer; transition: all 0.2s; }
+        .search-result-item:hover { background: var(--bg-hover); }
+        .add-btn { margin-left: auto; padding: 6px 14px; background: rgba(168,85,247,0.1); border: 1px solid var(--border-hover); color: var(--primary-light); border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .add-btn:hover { background: rgba(168,85,247,0.2); border-color: var(--primary); }
+
+        /* Image lightbox */
+        .lightbox-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 3000; cursor: zoom-out; }
+        .lightbox-overlay.active { display: flex; }
+        .lightbox-overlay img { max-width: 90%; max-height: 90%; border-radius: 8px; }
+
+        /* Request notification toast */
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
+        .toast { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; min-width: 300px; box-shadow: var(--glow); animation: slideInRight 0.3s ease; }
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+        .toast-text { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
+        .toast-actions { display: flex; gap: 8px; }
+
+        /* Connection status indicator */
+        .connection-status { position: fixed; top: 0; left: 0; right: 0; padding: 8px; text-align: center; font-size: 12px; font-weight: 600; z-index: 3000; transition: all 0.3s; }
+        .connection-status.connecting { background: rgba(168,85,247,0.2); color: var(--primary-light); }
+        .connection-status.disconnected { background: rgba(244,114,182,0.2); color: var(--accent-warm); }
+        .connection-status.connected { display: none; }
+
+        /* Upload progress */
+        .upload-progress { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 10px 20px; font-size: 13px; color: var(--text-muted); z-index: 1500; display: none; }
+        .upload-progress.active { display: block; }
+
+        @media (max-width: 768px) {
+            .sidebar { width: 100%; position: absolute; z-index: 10; transform: translateX(-100%); transition: transform 0.3s; }
+            .sidebar.open { transform: translateX(0); }
+            .chat-area { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status disconnected" id="connectionStatus">⚠️ Disconnected — reconnecting...</div>
+    <div class="upload-progress" id="uploadProgress">📎 Uploading file...</div>
+
+    <div class="app">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">V</div>
+                    <div class="user-details">
+                        <h3 id="userDisplayName">Loading...</h3>
+                        <span>Online</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-tabs">
+                <div class="sidebar-tab active" id="tab-chats" onclick="switchTab('chats')">Chats</div>
+                <div class="sidebar-tab" id="tab-requests" onclick="switchTab('requests')">
+                    Requests <span class="badge" id="requestBadge" style="display:none;">0</span>
+                </div>
+            </div>
+
+            <div class="search-box" id="contactSearchBox">
+                <input type="text" placeholder="Search contacts..." id="contactSearch" oninput="filterContacts()">
+            </div>
+
+            <div class="contacts-list" id="contactsList"></div>
+            <div class="contacts-list" id="requestsList" style="display:none;"></div>
+
+            <div class="add-contact-btn" id="addContactBtn" onclick="openAddContact()">+ Add New Contact</div>
+
+            <div class="sidebar-footer">
+                <a href="/logout">🚪 Logout</a>
+            </div>
+        </div>
+
+        <div class="chat-area">
+            <div class="chat-header" id="chatHeader" style="display: none;">
+                <div class="contact-avatar" id="chatAvatar">?</div>
+                <div class="chat-header-info">
+                    <h3 id="chatContactName">Select a contact</h3>
+                    <p id="chatContactStatus"><span class="status-dot offline"></span> Offline</p>
+                </div>
+                <div class="encrypted-indicator">🔒 End-to-End Encrypted</div>
+            </div>
+
+            <div class="messages-container" id="messagesContainer">
+                <div class="empty-state">
+                    <div class="empty-state-icon">💬</div>
+                    <h3>Welcome to ValuChat</h3>
+                    <p>Select a contact to start a secure conversation</p>
+                </div>
+            </div>
+
+            <div class="chat-input-area" id="chatInputArea" style="display: none;">
+                <div id="filePreviewArea"></div>
+                <div class="chat-input-wrapper">
+                    <textarea class="chat-input" id="messageInput" rows="1" placeholder="Type a secure message..." onkeydown="handleKeyDown(event)" oninput="handleTyping()"></textarea>
+                    <div class="input-actions">
+                        <button class="attach-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Attach file">📎</button>
+                        <input type="file" id="fileInput" style="display:none;" onchange="handleFileSelect(event)">
+                        <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox for images -->
+    <div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+        <img src="" id="lightboxImg" alt="Full size">
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Add Contact Modal -->
+    <div class="modal-overlay" id="addContactModal">
+        <div class="modal">
+            <button class="modal-close" onclick="closeAddContact()">×</button>
+            <h2>Add Contact</h2>
+            <p>Search for users by username or display name</p>
+            <div class="search-box" style="padding: 0;">
+                <input type="text" placeholder="Search users..." id="userSearchInput" oninput="searchUsers()" style="background: var(--bg-card);">
+            </div>
+            <div class="search-results" id="searchResults"></div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // PIN-BASED ENCRYPTION SYSTEM
+        // ============================================
+        // User sets a PIN on first chat open. The PIN derives a master key.
+        // All conversation keys are derived from the master key + contact ID.
+        // On reload, user re-enters PIN to restore the same master key.
+        // No keys stored in localStorage - everything is deterministic from PIN.
+
+        const ENC = {
+            abToBase64: (buffer) => {
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+                return btoa(binary);
+            },
+            base64ToAb: (base64) => {
+                const binary = atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                return bytes.buffer;
+            },
+            deriveKeyFromPassword: async (password, salt) => {
+                const encoder = new TextEncoder();
+                const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
+                return crypto.subtle.deriveKey(
+                    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+                    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+                );
+            },
+            deriveRawKey: async (password, salt) => {
+                const encoder = new TextEncoder();
+                const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
+                return crypto.subtle.deriveBits(
+                    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+                    keyMaterial, 256
+                );
+            },
+            encrypt: async (text, key) => {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(text);
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+                return { ciphertext: ENC.abToBase64(encrypted), nonce: ENC.abToBase64(iv) };
+            },
+            decrypt: async (ciphertext, nonce, key) => {
+                const iv = new Uint8Array(ENC.base64ToAb(nonce));
+                const encrypted = ENC.base64ToAb(ciphertext);
+                const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+                return new TextDecoder().decode(decrypted);
+            }
+        };
+
+        // ============================================
+        // MASTER KEY MANAGEMENT (PIN-based)
+        // ============================================
+        let masterKey = null;      // The AES key derived from PIN
+        let masterKeyRaw = null;   // Raw bytes of master key for sub-key derivation
+        let sharedKeys = {};       // Cache of conversation keys
+        let pinVerified = false;
+
+        // The PIN system relies on the Web Crypto API (crypto.subtle), which
+        // browsers ONLY expose on a secure context: https:// or http://localhost.
+        // If the page is opened over plain http:// on a LAN/IP address,
+        // crypto.subtle is undefined and every PIN operation silently fails,
+        // which looks exactly like "PIN never gets accepted".
+        function cryptoAvailable() {
+            return !!(window.crypto && window.crypto.subtle);
+        }
+
+        // Derive master key from PIN using a fixed salt
+        async function deriveMasterKey(pin) {
+            const fixedSalt = new Uint8Array([118, 97, 108, 117, 99, 104, 97, 116, 45, 109, 97, 115, 116, 101, 114, 45]); // "valuchat-master-"
+            const key = await ENC.deriveKeyFromPassword(pin, fixedSalt);
+            const rawBits = await ENC.deriveRawKey(pin, fixedSalt);
+            return { key, raw: new Uint8Array(rawBits) };
+        }
+
+        // Derive a conversation-specific key from master key + contact IDs
+        async function deriveConversationKey(contactId) {
+            if (!masterKey || !masterKeyRaw) {
+                throw new Error('Master key not available - PIN required');
+            }
+            if (sharedKeys[contactId]) return sharedKeys[contactId];
+
+            // Deterministic conversation ID from sorted user IDs
+            const ids = [currentUser.id.toString(), contactId.toString()].sort();
+            const conversationId = ids.join(':');
+
+            // Derive conversation salt: HMAC-SHA256(masterKey, conversationId) -> take first 16 bytes
+            const encoder = new TextEncoder();
+            const convData = encoder.encode(conversationId);
+            const hmacKey = await crypto.subtle.importKey(
+                'raw', masterKeyRaw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+            );
+            const saltFull = await crypto.subtle.sign('HMAC', hmacKey, convData);
+            const salt = new Uint8Array(saltFull).slice(0, 16);
+
+            // Derive conversation key: PBKDF2(masterKey as password, conversation salt)
+            // We use the raw master key bits as the "password" for PBKDF2
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw', masterKeyRaw, 'PBKDF2', false, ['deriveBits', 'deriveKey']
+            );
+            const convKey = await crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+                keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+            );
+
+            sharedKeys[contactId] = convKey;
+            return convKey;
+        }
+
+        // ============================================
+        // PIN MODAL
+        // ============================================
+        // PIN hash key is scoped to the logged-in user's id so two different
+        // accounts logged in on the same browser never collide/overwrite
+        // each other's stored PIN hash.
+        function pinStorageKey() {
+            return `valuchat_pin_hash_${currentUser.id}`;
+        }
+
+        function showPinModal(isFirstTime = false) {
+            const existing = document.getElementById('pinModal');
+            if (existing) existing.remove();
+
+            if (!cryptoAvailable()) {
+                alert(
+                    'Secure messaging cannot be unlocked on this connection.\n\n' +
+                    'Your browser only allows the encryption features ValuChat needs ' +
+                    'when the page is opened over HTTPS, or over http://localhost.\n\n' +
+                    'Right now this page is not on a secure connection, so PIN entry ' +
+                    'will keep failing silently. Please reopen ValuChat using an ' +
+                    'https:// address (or http://localhost if you are on this same machine).'
+                );
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.id = 'pinModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
+            modal.innerHTML = `
+                <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:40px;width:100%;max-width:380px;box-shadow:var(--glow);text-align:center;">
+                    <div style="font-size:48px;margin-bottom:16px;">🔐</div>
+                    <h2 style="font-size:24px;font-weight:800;margin-bottom:8px;">${isFirstTime ? 'Set Your PIN' : 'Enter Your PIN'}</h2>
+                    <p style="color:var(--text-muted);font-size:14px;margin-bottom:24px;line-height:1.5;">
+                        ${isFirstTime 
+                            ? 'Create a PIN to encrypt your messages.<br><b>Remember this PIN!</b> You will need it to restore your chat history.<br><br><b>Important:</b> the person you\'re chatting with must use the <u>same PIN</u> as you, or your messages to each other cannot be decrypted.' 
+                            : 'Enter your PIN to restore your encrypted chat history.'}
+                    </p>
+                    <input type="password" id="pinInput" maxlength="6" placeholder="${isFirstTime ? 'Create 6-digit PIN' : 'Your 6-digit PIN'}" 
+                        style="width:100%;padding:16px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-size:20px;text-align:center;letter-spacing:8px;font-weight:700;outline:none;transition:all 0.3s;margin-bottom:16px;"
+                        onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'">
+                    ${isFirstTime ? `
+                    <input type="password" id="pinConfirm" maxlength="6" placeholder="Confirm PIN" 
+                        style="width:100%;padding:16px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-size:20px;text-align:center;letter-spacing:8px;font-weight:700;outline:none;transition:all 0.3s;margin-bottom:20px;"
+                        onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'">
+                    ` : ''}
+                    <button id="pinSubmitBtn" style="width:100%;padding:14px;background:var(--gradient);color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:all 0.3s;box-shadow:0 4px 20px rgba(168,85,247,0.3);">
+                        ${isFirstTime ? 'Set PIN & Continue' : 'Unlock Messages'}
+                    </button>
+                    <p style="color:var(--text-dim);font-size:12px;margin-top:16px;">
+                        🔒 Your PIN never leaves this device. It is used to derive your encryption keys.
+                    </p>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const pinInput = document.getElementById('pinInput');
+            const pinConfirm = document.getElementById('pinConfirm');
+            const submitBtn = document.getElementById('pinSubmitBtn');
+
+            pinInput.focus();
+
+            // Allow only digits
+            [pinInput, pinConfirm].forEach(el => {
+                if (el) el.addEventListener('input', (e) => {
+                    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+                });
+            });
+
+            // Enter key submits
+            pinInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    if (pinConfirm) pinConfirm.focus();
+                    else submitPin(isFirstTime);
+                }
+            });
+            if (pinConfirm) {
+                pinConfirm.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') submitPin(isFirstTime);
+                });
+            }
+
+            submitBtn.addEventListener('click', () => submitPin(isFirstTime));
+        }
+
+        async function submitPin(isFirstTime) {
+            const pin = document.getElementById('pinInput').value;
+            const pinConfirm = document.getElementById('pinConfirm');
+
+            if (pin.length < 4) {
+                alert('PIN must be at least 4 digits');
+                return;
+            }
+
+            if (!cryptoAvailable()) {
+                alert(
+                    'Cannot process your PIN: this connection is not secure ' +
+                    '(the browser blocks the required encryption on plain http:// ' +
+                    'addresses other than localhost). Reopen ValuChat over https:// ' +
+                    'or http://localhost and try again.'
+                );
+                return;
+            }
+
+            // Everything below touches the Web Crypto API - wrap it all so any
+            // failure surfaces a real error instead of leaving the modal stuck.
+            try {
+                if (isFirstTime && pinConfirm) {
+                    if (pin !== pinConfirm.value) {
+                        alert('PINs do not match!');
+                        return;
+                    }
+                    // Store a hash of the PIN to verify on next login (not the PIN itself!)
+                    const pinHash = await hashPin(pin);
+                    localStorage.setItem(pinStorageKey(), pinHash);
+                } else {
+                    // Verify PIN against stored hash
+                    const storedHash = localStorage.getItem(pinStorageKey());
+                    if (storedHash) {
+                        const inputHash = await hashPin(pin);
+                        if (inputHash !== storedHash) {
+                            alert('Incorrect PIN. Please try again.');
+                            document.getElementById('pinInput').value = '';
+                            document.getElementById('pinInput').focus();
+                            return;
+                        }
+                    }
+                }
+
+                // Derive master key from PIN
+                const result = await deriveMasterKey(pin);
+                masterKey = result.key;
+                masterKeyRaw = result.raw;
+                pinVerified = true;
+
+                // Remove modal
+                const modal = document.getElementById('pinModal');
+                if (modal) modal.remove();
+
+                // Now derive all conversation keys and load messages
+                await restoreAllConversationKeys();
+
+                // If a contact is selected, reload their messages
+                if (currentContact) {
+                    await loadMessages(currentContact.id);
+                } else {
+                    // Restore the conversation the user was last viewing before reload
+                    const lastContactId = sessionStorage.getItem('valuchat_last_contact');
+                    if (lastContactId && contacts.some(c => c.id == lastContactId)) {
+                        await selectContact(parseInt(lastContactId, 10));
+                    }
+                }
+
+                showToast('Messages Unlocked', 'Your chat history has been restored.', 'success');
+            } catch (e) {
+                console.error('Failed to derive master key:', e);
+                alert('Failed to unlock messages. Please try again.');
+            }
+        }
+
+        async function hashPin(pin) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode('valuchat-pin-verify:' + pin);
+            const hash = await crypto.subtle.digest('SHA-256', data);
+            return ENC.abToBase64(hash);
+        }
+
+        async function restoreAllConversationKeys() {
+            if (!masterKey) return;
+            // Derive keys for all contacts
+            for (const contact of contacts) {
+                try {
+                    await deriveConversationKey(contact.id);
+                } catch (e) {
+                    console.warn('Failed to derive key for contact', contact.id, e);
+                }
+            }
+        }
+
+        // ============================================
+        // CSRF Token for AJAX requests
+        // ============================================
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options = {}) {
+            if (options.method && !/^(GET|HEAD)$/i.test(options.method)) {
+                options.headers = options.headers || {};
+                if (typeof options.headers === 'object' && !(options.headers instanceof Headers)) {
+                    options.headers['X-CSRFToken'] = csrfToken;
+                }
+            }
+            return originalFetch(url, options);
+        };
+
+        // ============================================
+        // SOCKET.IO SETUP WITH RECONNECTION
+        // ============================================
+        const socket = io({
+            transports: ['polling', 'websocket'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            randomizationFactor: 0.5
+        });
+
+        let currentUser = null;
+        let currentContact = null;
+        let contacts = [];
+        let messageRequests = [];
+        let typingTimeout;
+        let currentTab = 'chats';
+        let pendingMessages = [];
+        let selectedFile = null;
+        let heartbeatInterval = null;
+
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        function updateConnectionStatus(status) {
+            connectionStatus.className = 'connection-status ' + status;
+            if (status === 'connecting') {
+                connectionStatus.textContent = '⟳ Connecting...';
+                connectionStatus.style.display = 'block';
+            } else if (status === 'disconnected') {
+                connectionStatus.textContent = '⚠️ Disconnected — reconnecting...';
+                connectionStatus.style.display = 'block';
+            } else {
+                connectionStatus.style.display = 'none';
+            }
+        }
+
+        socket.on('connect', () => {
+            updateConnectionStatus('connected');
+            console.log('Connected to ValuChat server');
+            while (pendingMessages.length > 0) {
+                const msg = pendingMessages.shift();
+                socket.emit('send_message', msg);
+            }
+            if (!heartbeatInterval) {
+                heartbeatInterval = setInterval(() => {
+                    socket.emit('heartbeat', {});
+                }, 30000);
+            }
+        });
+
+        socket.on('disconnect', () => {
+            updateConnectionStatus('disconnected');
+            console.log('Disconnected from server');
+        });
+
+        socket.on('reconnect', (attemptNumber) => {
+            updateConnectionStatus('connected');
+            console.log('Reconnected after', attemptNumber, 'attempts');
+        });
+
+        socket.on('reconnect_attempt', () => updateConnectionStatus('connecting'));
+
+        socket.on('error', (data) => {
+            console.error('Socket error:', data);
+            showError(escapeHtml(data.message || 'Connection error'));
+        });
+
+        // ============================================
+        // INITIALIZATION
+        // ============================================
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadUser();
+            await loadContacts();
+            await loadMessageRequests();
+
+            // Check if user has a PIN set
+            const hasPin = localStorage.getItem(pinStorageKey());
+            if (hasPin) {
+                showPinModal(false); // Ask for existing PIN
+            } else {
+                showPinModal(true);  // Ask to create PIN
+            }
+
+            socket.on('new_message', async (data) => {
+                if (!pinVerified) return; // Don't process until PIN entered
+                if (currentContact && data.sender_id == currentContact.id) {
+                    await displayMessage(data, false);
+                } else {
+                    const contactEl = document.querySelector(`[data-contact-id="${data.sender_id}"]`);
+                    if (contactEl) contactEl.classList.add('unread');
+                }
+            });
+
+            socket.on('new_message_request', (data) => {
+                showRequestToast(data);
+                loadMessageRequests();
+            });
+
+            socket.on('request_accepted', (data) => {
+                showToast('Request Accepted', `${escapeHtml(data.accepted_by_name)} accepted your message request!`, 'success');
+                loadContacts();
+            });
+
+            socket.on('message_request_sent', (data) => {
+                showToast('Message Request Sent', 'Your message has been sent as a request.', 'info');
+            });
+
+            socket.on('user_typing', (data) => {
+                if (currentContact && data.user_id == currentContact.id) {
+                    const statusEl = document.getElementById('chatContactStatus');
+                    statusEl.innerHTML = '<span class="status-dot online"></span> typing...';
+                    statusEl.classList.add('typing');
+                    setTimeout(() => updateChatHeaderStatus(), 2000);
+                }
+            });
+
+            socket.on('user_status_change', (data) => {
+                const contact = contacts.find(c => c.id == data.user_id);
+                if (contact) {
+                    contact.status = data.status;
+                    contact.last_seen = data.last_seen;
+                    renderContacts();
+                    if (currentContact && currentContact.id == data.user_id) {
+                        updateChatHeaderStatus();
+                    }
+                }
+            });
+        });
+
+        // ============================================
+        // USER & CONTACT MANAGEMENT
+        // ============================================
+        async function loadUser() {
+            try {
+                const res = await fetch('/api/user');
+                if (!res.ok) throw new Error('Unauthorized');
+                currentUser = await res.json();
+                document.getElementById('userDisplayName').textContent = escapeHtml(currentUser.display_name || currentUser.username);
+                document.getElementById('userAvatar').textContent = (currentUser.display_name || currentUser.username).charAt(0).toUpperCase();
+            } catch (e) {
+                console.error('Failed to load user:', e);
+                window.location.href = '/login';
+            }
+        }
+
+        async function loadContacts() {
+            try {
+                const res = await fetch('/api/contacts');
+                if (!res.ok) throw new Error('Failed to load contacts');
+                contacts = await res.json();
+                if (currentTab === 'chats') renderContacts();
+            } catch (e) {
+                console.error('Failed to load contacts:', e);
+            }
+        }
+
+        async function loadMessageRequests() {
+            try {
+                const res = await fetch('/api/message-requests');
+                if (!res.ok) throw new Error('Failed to load requests');
+                messageRequests = await res.json();
+                updateRequestBadge();
+                if (currentTab === 'requests') renderRequests();
+            } catch (e) {
+                console.error('Failed to load requests:', e);
+            }
+        }
+
+        function updateRequestBadge() {
+            const badge = document.getElementById('requestBadge');
+            if (messageRequests.length > 0) {
+                badge.textContent = messageRequests.length;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+
+            const contactsList = document.getElementById('contactsList');
+            const requestsList = document.getElementById('requestsList');
+            const searchBox = document.getElementById('contactSearchBox');
+            const addBtn = document.getElementById('addContactBtn');
+
+            if (tab === 'chats') {
+                contactsList.style.display = 'block';
+                requestsList.style.display = 'none';
+                searchBox.style.display = 'block';
+                addBtn.style.display = 'block';
+                renderContacts();
+            } else {
+                contactsList.style.display = 'none';
+                requestsList.style.display = 'block';
+                searchBox.style.display = 'none';
+                addBtn.style.display = 'none';
+                renderRequests();
+            }
+        }
+
+        function renderContacts() {
+            const container = document.getElementById('contactsList');
+            if (contacts.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 13px;">No contacts yet.<br>Click "Add New Contact" to get started.</div>';
+                return;
+            }
+
+            container.innerHTML = contacts.map(c => {
+                const statusClass = c.status === 'online' ? 'status-online' : 'status-offline';
+                const statusText = c.status === 'online' ? 'Online' : formatLastSeen(c.last_seen);
+                return `
+                <div class="contact-item ${currentContact && currentContact.id == c.id ? 'active' : ''}" 
+                     data-contact-id="${c.id}" onclick="selectContact(${c.id})">
+                    <div class="contact-avatar">${escapeHtml((c.display_name || c.username).charAt(0).toUpperCase())}</div>
+                    <div class="contact-info">
+                        <h4>${escapeHtml(c.display_name || c.username)}</h4>
+                        <p>${escapeHtml(statusText)}</p>
+                    </div>
+                    <div class="contact-status ${statusClass}"></div>
+                </div>
+            `}).join('');
+        }
+
+        function formatLastSeen(timestamp) {
+            if (!timestamp) return 'Offline';
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = (now - date) / 1000;
+            if (diff < 60) return 'Just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return date.toLocaleDateString();
+        }
+
+        function renderRequests() {
+            const container = document.getElementById('requestsList');
+            if (messageRequests.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 13px;">No message requests.<br>When someone new messages you, they will appear here.</div>';
+                return;
+            }
+
+            container.innerHTML = messageRequests.map(r => `
+                <div class="request-item" data-request-id="${r.id}">
+                    <div class="contact-avatar">${escapeHtml(r.sender_name.charAt(0).toUpperCase())}</div>
+                    <div class="contact-info">
+                        <h4>${escapeHtml(r.sender_name)}</h4>
+                        <p>@${escapeHtml(r.sender_username)}</p>
+                    </div>
+                    <div class="request-actions">
+                        <button class="request-btn btn-accept" onclick="acceptRequest(${r.id})">Accept</button>
+                        <button class="request-btn btn-decline" onclick="declineRequest(${r.id})">Decline</button>
+                        <button class="request-btn btn-block" onclick="blockRequest(${r.id})">Block</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function acceptRequest(requestId) {
+            try {
+                const res = await fetch(`/api/message-requests/${requestId}/accept`, { method: 'POST' });
+                if (res.ok) {
+                    await loadMessageRequests();
+                    await loadContacts();
+                    showToast('Request Accepted', 'You can now chat with this user.', 'success');
+                }
+            } catch (e) { console.error('Accept failed:', e); }
+        }
+
+        async function declineRequest(requestId) {
+            try {
+                const res = await fetch(`/api/message-requests/${requestId}/decline`, { method: 'POST' });
+                if (res.ok) {
+                    await loadMessageRequests();
+                    showToast('Request Declined', 'The message request has been removed.', 'info');
+                }
+            } catch (e) { console.error('Decline failed:', e); }
+        }
+
+        async function blockRequest(requestId) {
+            try {
+                const res = await fetch(`/api/message-requests/${requestId}/block`, { method: 'POST' });
+                if (res.ok) {
+                    await loadMessageRequests();
+                    showToast('User Blocked', 'This user can no longer message you.', 'warning');
+                }
+            } catch (e) { console.error('Block failed:', e); }
+        }
+
+        function showRequestToast(data) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <div class="toast-title">📩 New Message Request</div>
+                <div class="toast-text">${escapeHtml(data.sender_name)} wants to message you</div>
+                <div class="toast-actions">
+                    <button class="request-btn btn-accept" onclick="acceptRequest(${data.id}); this.closest('.toast').remove();">Accept</button>
+                    <button class="request-btn btn-decline" onclick="declineRequest(${data.id}); this.closest('.toast').remove();">Decline</button>
+                </div>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 10000);
+        }
+
+        function showToast(title, text, type) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            const color = type === 'success' ? '#22c55e' : type === 'warning' ? '#f472b6' : '#c084fc';
+            toast.style.borderLeft = `3px solid ${color}`;
+            toast.innerHTML = `<div class="toast-title">${escapeHtml(title)}</div><div class="toast-text">${escapeHtml(text)}</div>`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        function filterContacts() {
+            const query = document.getElementById('contactSearch').value.toLowerCase();
+            document.querySelectorAll('.contact-item').forEach(el => {
+                const name = el.querySelector('h4').textContent.toLowerCase();
+                el.style.display = name.includes(query) ? 'flex' : 'none';
+            });
+        }
+
+        // ============================================
+        // CHAT INTERFACE
+        // ============================================
+        async function selectContact(contactId) {
+            currentContact = contacts.find(c => c.id == contactId);
+            if (!currentContact) return;
+
+            sessionStorage.setItem('valuchat_last_contact', contactId);
+
+            const contactEl = document.querySelector(`[data-contact-id="${contactId}"]`);
+            if (contactEl) contactEl.classList.remove('unread');
+
+            // Ensure conversation key is ready
+            if (pinVerified) {
+                try {
+                    await deriveConversationKey(contactId);
+                } catch (e) {
+                    console.warn('Could not derive conversation key:', e);
+                }
+            }
+
+            renderContacts();
+            document.getElementById('chatHeader').style.display = 'flex';
+            document.getElementById('chatInputArea').style.display = 'block';
+            document.getElementById('chatAvatar').textContent = escapeHtml((currentContact.display_name || currentContact.username).charAt(0).toUpperCase());
+            document.getElementById('chatContactName').textContent = escapeHtml(currentContact.display_name || currentContact.username);
+            updateChatHeaderStatus();
+            await loadMessages(contactId);
+        }
+
+        function updateChatHeaderStatus() {
+            if (!currentContact) return;
+            const statusEl = document.getElementById('chatContactStatus');
+            if (currentContact.status === 'online') {
+                statusEl.innerHTML = '<span class="status-dot online"></span> Online';
+            } else {
+                statusEl.innerHTML = '<span class="status-dot offline"></span> ' + escapeHtml(formatLastSeen(currentContact.last_seen));
+            }
+        }
+
+        async function loadMessages(contactId) {
+            try {
+                // Ensure key is derived before loading messages
+                if (pinVerified) {
+                    try {
+                        await deriveConversationKey(contactId);
+                    } catch (e) {
+                        console.warn('Key derivation failed:', e);
+                    }
+                }
+
+                const res = await fetch(`/api/messages/${contactId}`);
+                if (!res.ok) throw new Error('Failed to load messages');
+                const messages = await res.json();
+                const container = document.getElementById('messagesContainer');
+                container.innerHTML = '';
+
+                for (const m of messages) {
+                    const isSent = m.sender_id == currentUser.id;
+                    await displayMessage(m, isSent, false);
+                }
+                scrollToBottom();
+            } catch (e) {
+                console.error('Failed to load messages:', e);
+            }
+        }
+
+        async function displayMessage(data, isSent, animate = true) {
+            const container = document.getElementById('messagesContainer');
+            const existing = document.querySelector(`[data-msg-id="${data.id}"]`);
+            if (existing) return;
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${isSent ? 'message-sent' : 'message-received'}`;
+            msgDiv.setAttribute('data-msg-id', data.id);
+            if (!animate) msgDiv.style.animation = 'none';
+
+            let content = '';
+            let fileHtml = '';
+
+            // Handle file attachments
+            if (data.file_url && data.file_type) {
+                if (data.file_type === 'image') {
+                    fileHtml = `<img src="${escapeHtml(data.file_url)}" class="message-image" onclick="openLightbox('${escapeHtml(data.file_url)}')" alt="${escapeHtml(data.file_name || 'Image')}">`;
+                } else {
+                    const icon = data.file_type === 'video' ? '🎬' : data.file_type === 'audio' ? '🎵' : data.file_type === 'document' ? '📄' : '📎';
+                    fileHtml = `<a href="${escapeHtml(data.file_url)}" class="message-file" target="_blank" download="${escapeHtml(data.file_name || 'file')}">
+                        <span class="message-file-icon">${icon}</span>
+                        <div class="message-file-info">
+                            <div class="message-file-name">${escapeHtml(data.file_name || 'File')}</div>
+                            <div class="message-file-size">${formatFileSize(data.file_size)}</div>
+                        </div>
+                    </a>`;
+                }
+            }
+
+            // Handle text content
+            try {
+                if (data.encrypted_content && data.nonce) {
+                    const otherId = isSent ? data.receiver_id : data.sender_id;
+                    let key = null;
+
+                    if (pinVerified && masterKey) {
+                        try {
+                            key = await deriveConversationKey(otherId);
+                        } catch (e) {
+                            console.warn('Failed to derive conversation key for', otherId, e);
+                        }
+                    }
+
+                    if (key) {
+                        content = await ENC.decrypt(data.encrypted_content, data.nonce, key);
+                    } else {
+                        content = '🔒 Enter your PIN to unlock this message';
+                    }
+                } else if (data.message_type && data.message_type !== 'text') {
+                    content = '';
+                } else {
+                    content = data.content || '';
+                }
+            } catch (e) {
+                console.error('Decryption failed:', e);
+                content = '❌ Unable to decrypt - wrong PIN or corrupted message';
+            }
+
+            const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+            const textHtml = content ? escapeHtml(content) : '';
+            msgDiv.innerHTML = `${textHtml}${fileHtml}<div class="message-time">${time}</div>`;
+            container.appendChild(msgDiv);
+            scrollToBottom();
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return '';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
+        // ============================================
+        // FILE ATTACHMENT
+        // ============================================
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (file.size > 50 * 1024 * 1024) {
+                showError('File too large (max 50MB)');
+                event.target.value = '';
+                return;
+            }
+
+            selectedFile = file;
+            renderFilePreview();
+        }
+
+        function renderFilePreview() {
+            const area = document.getElementById('filePreviewArea');
+            if (!selectedFile) {
+                area.innerHTML = '';
+                return;
+            }
+
+            const isImage = selectedFile.type.startsWith('image/');
+            const icon = isImage ? '🖼️' : '📎';
+
+            area.innerHTML = `
+                <div class="file-preview">
+                    ${isImage ? `<img src="${URL.createObjectURL(selectedFile)}" alt="Preview">` : `<span style="font-size:24px;">${icon}</span>`}
+                    <div class="file-preview-info">
+                        <div class="file-preview-name">${escapeHtml(selectedFile.name)}</div>
+                        <div class="file-preview-size">${formatFileSize(selectedFile.size)}</div>
+                    </div>
+                    <button class="file-preview-remove" onclick="removeSelectedFile()">×</button>
+                </div>
+            `;
+        }
+
+        function removeSelectedFile() {
+            selectedFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('filePreviewArea').innerHTML = '';
+        }
+
+        // ============================================
+        // MESSAGE SENDING (with file support)
+        // ============================================
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+
+            if (!currentContact) return;
+            if (!text && !selectedFile) return;
+
+            if (!pinVerified || !masterKey) {
+                showError('Please enter your PIN first to unlock messaging');
+                return;
+            }
+
+            // If there's a file, upload it first
+            if (selectedFile) {
+                await sendFileMessage(text);
+                return;
+            }
+
+            // Text-only message
+            if (text.length > 5000) {
+                showError('Message too long (max 5000 characters)');
+                return;
+            }
+
+            try {
+                const key = await deriveConversationKey(currentContact.id);
+                const encrypted = await ENC.encrypt(text, key);
+                const tempId = 'temp-' + Date.now();
+                const optimisticMsg = {
+                    id: tempId,
+                    sender_id: currentUser.id,
+                    receiver_id: currentContact.id,
+                    encrypted_content: encrypted.ciphertext,
+                    nonce: encrypted.nonce,
+                    timestamp: new Date().toISOString()
+                };
+                await displayMessage(optimisticMsg, true);
+
+                const msgPayload = {
+                    receiver_id: currentContact.id,
+                    encrypted_content: encrypted.ciphertext,
+                    nonce: encrypted.nonce,
+                    salt: 'pin-based-v3'
+                };
+
+                if (socket.connected) {
+                    socket.emit('send_message', msgPayload);
+                } else {
+                    pendingMessages.push(msgPayload);
+                    showToast('Offline', 'Message queued and will send when connection is restored.', 'warning');
+                }
+
+                input.value = '';
+                input.style.height = 'auto';
+            } catch (e) {
+                console.error('Send failed:', e);
+                showError('Failed to send message - make sure your PIN is entered');
+            }
+        }
+
+        async function sendFileMessage(text) {
+            const progressEl = document.getElementById('uploadProgress');
+            progressEl.classList.add('active');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                formData.append('receiver_id', currentContact.id);
+
+                const res = await fetch('/api/upload-chat-file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await res.json();
+                progressEl.classList.remove('active');
+
+                if (result.success) {
+                    const msgData = result.data;
+                    msgData.sender_id = currentUser.id;
+                    msgData.receiver_id = currentContact.id;
+                    await displayMessage(msgData, true);
+
+                    if (text.trim()) {
+                        document.getElementById('messageInput').value = text;
+                        selectedFile = null;
+                        document.getElementById('filePreviewArea').innerHTML = '';
+                        document.getElementById('fileInput').value = '';
+                        await sendMessage();
+                    } else {
+                        removeSelectedFile();
+                    }
+                } else {
+                    showError(result.error || 'Failed to send file');
+                }
+            } catch (e) {
+                progressEl.classList.remove('active');
+                console.error('File upload failed:', e);
+                showError('Failed to upload file');
+            }
+        }
+
+        function showError(text) {
+            const container = document.getElementById('messagesContainer');
+            const errDiv = document.createElement('div');
+            errDiv.className = 'message-error';
+            errDiv.textContent = text;
+            container.appendChild(errDiv);
+            scrollToBottom();
+            setTimeout(() => errDiv.remove(), 5000);
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function handleTyping() {
+            if (!currentContact) return;
+            clearTimeout(typingTimeout);
+            socket.emit('typing', { receiver_id: currentContact.id });
+        }
+
+        function scrollToBottom() {
+            const container = document.getElementById('messagesContainer');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        document.getElementById('messageInput').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        // ============================================
+        // LIGHTBOX
+        // ============================================
+        function openLightbox(src) {
+            document.getElementById('lightboxImg').src = src;
+            document.getElementById('lightbox').classList.add('active');
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        // ============================================
+        // ADD CONTACT MODAL
+        // ============================================
+        function openAddContact() {
+            document.getElementById('addContactModal').classList.add('active');
+            document.getElementById('userSearchInput').focus();
+        }
+
+        function closeAddContact() {
+            document.getElementById('addContactModal').classList.remove('active');
+            document.getElementById('userSearchInput').value = '';
+            document.getElementById('searchResults').innerHTML = '';
+        }
+
+        let searchDebounce;
+        async function searchUsers() {
+            clearTimeout(searchDebounce);
+            const query = document.getElementById('userSearchInput').value.trim();
+            const resultsContainer = document.getElementById('searchResults');
+
+            if (query.length < 2) {
+                resultsContainer.innerHTML = '';
+                return;
+            }
+
+            searchDebounce = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/search-users?q=${encodeURIComponent(query)}`);
+                    if (!res.ok) throw new Error('Search failed');
+                    const users = await res.json();
+
+                    if (users.length === 0) {
+                        resultsContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px;">No users found</div>';
+                        return;
+                    }
+
+                    resultsContainer.innerHTML = users.map(u => `
+                        <div class="search-result-item">
+                            <div class="contact-avatar" style="width: 36px; height: 36px; font-size: 14px;">${escapeHtml((u.display_name || u.username).charAt(0).toUpperCase())}</div>
+                            <div class="contact-info">
+                                <h4 style="font-size: 14px;">${escapeHtml(u.display_name || u.username)}</h4>
+                                <p style="font-size: 12px;">@${escapeHtml(u.username)}</p>
+                            </div>
+                            <button class="add-btn" onclick="addContact(${u.id}, '${escapeHtml((u.display_name || u.username).replace(/'/g, "\'"))}')">Add</button>
+                        </div>
+                    `).join('');
+                } catch (e) {
+                    console.error('Search failed:', e);
+                }
+            }, 300);
+        }
+
+        async function addContact(contactId, name) {
+            try {
+                const res = await fetch('/api/add-contact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contact_id: contactId })
+                });
+
+                if (res.ok) {
+                    closeAddContact();
+                    await loadContacts();
+                    // Derive key for new contact if PIN is ready
+                    if (pinVerified && masterKey) {
+                        try {
+                            await deriveConversationKey(contactId);
+                        } catch (e) {
+                            console.warn('Could not derive key for new contact:', e);
+                        }
+                    }
+                    showToast('Contact Added', `${name} has been added to your contacts.`, 'success');
+                } else {
+                    const data = await res.json();
+                    alert(escapeHtml(data.error || 'Failed to add contact'));
+                }
+            } catch (e) {
+                console.error('Add contact failed:', e);
+            }
+        }
+
+        document.getElementById('addContactModal').addEventListener('click', function(e) {
+            if (e.target === this) closeAddContact();
+        });
+    </script>
+</body>
+</html>

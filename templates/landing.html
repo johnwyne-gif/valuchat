@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ValuChat - Secure End-to-End Encrypted Messaging</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #a855f7;
+            --primary-light: #c084fc;
+            --primary-dark: #7c3aed;
+            --accent: #e879f9;
+            --accent-warm: #f472b6;
+            --bg: #0f0518;
+            --bg-elevated: #1a0b2e;
+            --bg-card: #241038;
+            --text: #f3e8ff;
+            --text-muted: #c4b5fd;
+            --text-dim: #8b5cf6;
+            --border: rgba(168,85,247,0.15);
+            --border-hover: rgba(168,85,247,0.3);
+            --gradient: linear-gradient(135deg, #a855f7, #e879f9);
+            --gradient-warm: linear-gradient(135deg, #a855f7, #f472b6);
+            --glow: 0 0 40px rgba(168,85,247,0.2);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+
+        .particles { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+        .particle { position: absolute; width: 4px; height: 4px; background: rgba(168,85,247,0.4); border-radius: 50%; animation: float 15s infinite; box-shadow: 0 0 10px rgba(168,85,247,0.5); }
+        @keyframes float {
+            0%, 100% { transform: translateY(0) translateX(0); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
+        }
+
+        .navbar { display: flex; justify-content: space-between; align-items: center; padding: 20px 60px; background: rgba(15,5,24,0.95); backdrop-filter: blur(20px); position: sticky; top: 0; z-index: 100; border-bottom: 1px solid var(--border); }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 42px; height: 42px; background: var(--gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; color: #fff; box-shadow: 0 0 20px rgba(168,85,247,0.4); }
+        .logo-text { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+        .logo-text span { color: var(--primary-light); }
+        .nav-links { display: flex; gap: 30px; align-items: center; }
+        .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 15px; transition: color 0.3s; }
+        .nav-links a:hover { color: var(--primary-light); }
+        .btn { padding: 10px 24px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px; transition: all 0.3s; border: none; cursor: pointer; }
+        .btn-outline { background: transparent; border: 1.5px solid var(--primary); color: var(--primary-light); }
+        .btn-outline:hover { background: rgba(168,85,247,0.1); box-shadow: 0 0 20px rgba(168,85,247,0.2); }
+        .btn-primary { background: var(--gradient); color: #fff; box-shadow: 0 4px 20px rgba(168,85,247,0.3); }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(168,85,247,0.5); }
+        .btn-lg { padding: 14px 32px; font-size: 16px; border-radius: 12px; }
+
+        .hero { display: flex; align-items: center; justify-content: center; padding: 80px 60px; gap: 60px; max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+        .hero-content { flex: 1; max-width: 600px; }
+        .badge { display: inline-block; background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: var(--primary-light); padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-bottom: 24px; }
+        .hero h1 { font-size: 56px; font-weight: 800; line-height: 1.1; margin-bottom: 24px; letter-spacing: -1px; }
+        .gradient-text { background: linear-gradient(135deg, #a855f7, #e879f9, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero p { font-size: 18px; color: var(--text-muted); line-height: 1.7; margin-bottom: 36px; }
+        .hero-buttons { display: flex; gap: 16px; }
+        .hero-stats { margin-top: 48px; display: flex; gap: 40px; }
+        .stat-value { font-size: 28px; font-weight: 800; background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat-label { font-size: 13px; color: var(--text-dim); }
+
+        .hero-visual { flex: 1; max-width: 500px; position: relative; }
+        .chat-card { background: linear-gradient(135deg, rgba(168,85,247,0.1), rgba(232,121,249,0.08)); border: 1px solid var(--border); border-radius: 24px; padding: 30px; backdrop-filter: blur(20px); box-shadow: var(--glow); }
+        .chat-ui { background: var(--bg-elevated); border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
+        .chat-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+        .status-dot { width: 10px; height: 10px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 10px rgba(168,85,247,0.5); }
+        .encrypted-badge { font-size: 11px; color: var(--primary-light); margin-left: auto; }
+        .chat-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .msg-received { align-self: flex-start; background: var(--bg-card); padding: 12px 16px; border-radius: 16px 16px 16px 4px; max-width: 80%; font-size: 13px; color: var(--text-muted); border: 1px solid var(--border); }
+        .msg-sent { align-self: flex-end; background: var(--gradient); color: #fff; padding: 12px 16px; border-radius: 16px 16px 4px 16px; max-width: 80%; font-size: 13px; font-weight: 500; box-shadow: 0 4px 15px rgba(168,85,247,0.3); }
+        .chat-input { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: center; }
+        .input-placeholder { flex: 1; height: 36px; background: var(--bg-card); border-radius: 18px; display: flex; align-items: center; padding: 0 16px; font-size: 13px; color: var(--text-dim); border: 1px solid var(--border); }
+        .send-btn { width: 36px; height: 36px; background: var(--gradient); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; box-shadow: 0 0 15px rgba(168,85,247,0.4); }
+        .floating-tag { position: absolute; padding: 12px 20px; border-radius: 12px; font-size: 12px; font-weight: 600; backdrop-filter: blur(10px); }
+        .tag-1 { top: -20px; right: -20px; background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); color: var(--primary-light); }
+        .tag-2 { bottom: 40px; left: -30px; background: rgba(232,121,249,0.15); border: 1px solid rgba(232,121,249,0.3); color: var(--accent); }
+
+        .features { padding: 100px 60px; background: rgba(0,0,0,0.2); position: relative; z-index: 1; }
+        .section-header { text-align: center; max-width: 800px; margin: 0 auto 60px; }
+        .section-header h2 { font-size: 40px; font-weight: 800; margin-bottom: 16px; }
+        .section-header p { color: var(--text-muted); font-size: 18px; }
+        .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; max-width: 1200px; margin: 0 auto; }
+        .feature-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 20px; padding: 40px 30px; text-align: left; transition: all 0.3s; }
+        .feature-card:hover { transform: translateY(-5px); border-color: var(--border-hover); box-shadow: var(--glow); }
+        .feature-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 20px; }
+        .feature-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+        .feature-card p { color: var(--text-muted); font-size: 15px; line-height: 1.6; }
+
+        .security { padding: 100px 60px; position: relative; z-index: 1; }
+        .security-content { max-width: 1200px; margin: 0 auto; display: flex; gap: 60px; align-items: center; }
+        .security-left { flex: 1; }
+        .security-left h2 { font-size: 40px; font-weight: 800; margin-bottom: 20px; }
+        .security-left > p { color: var(--text-muted); font-size: 18px; line-height: 1.7; margin-bottom: 30px; }
+        .step { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 20px; }
+        .step-num { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; font-weight: 700; }
+        .step h4 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+        .step p { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+        .security-right { flex: 1; display: flex; justify-content: center; }
+        .security-card { background: linear-gradient(135deg, rgba(168,85,247,0.05), rgba(232,121,249,0.05)); border: 1px solid var(--border); border-radius: 24px; padding: 40px; width: 100%; max-width: 450px; }
+        .security-card h3 { text-align: center; font-size: 22px; font-weight: 700; margin-bottom: 30px; }
+        .security-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: var(--bg-card); border-radius: 12px; margin-bottom: 12px; border: 1px solid var(--border); }
+        .security-row span:first-child { font-size: 14px; color: var(--text-muted); }
+        .security-row span:last-child { font-size: 14px; font-weight: 700; background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+        .cta { padding: 100px 60px; background: linear-gradient(135deg, rgba(168,85,247,0.05), rgba(232,121,249,0.05)); position: relative; z-index: 1; }
+        .cta-content { max-width: 800px; margin: 0 auto; text-align: center; }
+        .cta-content h2 { font-size: 42px; font-weight: 800; margin-bottom: 20px; }
+        .cta-content p { color: var(--text-muted); font-size: 18px; line-height: 1.7; margin-bottom: 40px; }
+
+        footer { padding: 50px 60px; border-top: 1px solid var(--border); position: relative; z-index: 1; }
+        .footer-content { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+        .footer-links { display: flex; gap: 30px; }
+        .footer-links a { color: var(--text-dim); text-decoration: none; font-size: 14px; }
+        .footer-links a:hover { color: var(--primary-light); }
+        .copyright { color: var(--text-dim); font-size: 13px; }
+
+        .flash-messages { position: fixed; top: 80px; right: 20px; z-index: 200; }
+        .flash { padding: 14px 24px; border-radius: 10px; margin-bottom: 10px; font-size: 14px; font-weight: 500; animation: slideIn 0.3s ease; }
+        .flash-success { background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); color: var(--primary-light); }
+        .flash-error { background: rgba(244,114,182,0.15); border: 1px solid rgba(244,114,182,0.3); color: var(--accent-warm); }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        @media (max-width: 1024px) {
+            .hero { flex-direction: column; text-align: center; }
+            .hero-content { max-width: 100%; }
+            .hero-buttons { justify-content: center; }
+            .hero-stats { justify-content: center; }
+            .hero-visual { max-width: 100%; }
+            .features-grid { grid-template-columns: repeat(2, 1fr); }
+            .security-content { flex-direction: column; }
+        }
+        @media (max-width: 768px) {
+            .navbar { padding: 15px 20px; }
+            .nav-links { display: none; }
+            .hero { padding: 40px 20px; }
+            .hero h1 { font-size: 36px; }
+            .features { padding: 60px 20px; }
+            .features-grid { grid-template-columns: 1fr; }
+            .security { padding: 60px 20px; }
+            .cta { padding: 60px 20px; }
+            .footer-content { flex-direction: column; gap: 20px; text-align: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="particles" id="particles"></div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <nav class="navbar">
+        <div class="logo">
+            <div class="logo-icon">V</div>
+            <div class="logo-text">Valu<span>Chat</span></div>
+        </div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#security">Security</a>
+            <a href="#download">Download</a>
+            <a href="/login" class="btn btn-outline">Log In</a>
+            <a href="/register" class="btn btn-primary">Get Started</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <div class="badge">🔒 End-to-End Encrypted</div>
+            <h1>Secure Messaging,<br><span class="gradient-text">Built for Privacy</span></h1>
+            <p>ValuChat uses military-grade AES-256-GCM encryption to ensure your conversations stay between you and your contacts. No backdoors. No data mining. Just pure, secure communication.</p>
+            <div class="hero-buttons">
+                <a href="/register" class="btn btn-primary btn-lg">Start Chatting Securely →</a>
+                <a href="#security" class="btn btn-outline btn-lg">How It Works</a>
+            </div>
+            <div class="hero-stats">
+                <div><div class="stat-value">256-bit</div><div class="stat-label">AES Encryption</div></div>
+                <div><div class="stat-value">Zero</div><div class="stat-label">Data Retention</div></div>
+                <div><div class="stat-value">100%</div><div class="stat-label">Open Source</div></div>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="chat-card">
+                <div class="chat-ui">
+                    <div class="chat-header">
+                        <div class="status-dot"></div>
+                        <span style="font-size: 14px; font-weight: 600;">Alice</span>
+                        <span class="encrypted-badge">🔒 Encrypted</span>
+                    </div>
+                    <div class="chat-body">
+                        <div class="msg-received">Hey! Have you checked out ValuChat yet?</div>
+                        <div class="msg-sent">Yes! The encryption is amazing 🔐</div>
+                        <div class="msg-received">No one can read our messages, not even the server!</div>
+                        <div class="msg-sent">Exactly! True end-to-end encryption 💜</div>
+                    </div>
+                    <div class="chat-input">
+                        <div class="input-placeholder">Type a secure message...</div>
+                        <div class="send-btn">➤</div>
+                    </div>
+                </div>
+            </div>
+            <div class="floating-tag tag-1">🔐 AES-256-GCM</div>
+            <div class="floating-tag tag-2">⚡ Real-time</div>
+        </div>
+    </section>
+
+    <section class="features" id="features">
+        <div class="section-header">
+            <h2>Why Choose <span class="gradient-text">ValuChat</span>?</h2>
+            <p>Built with security-first architecture for the modern communicator</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(168,85,247,0.1);">🔒</div>
+                <h3>End-to-End Encryption</h3>
+                <p>Every message is encrypted with AES-256-GCM before leaving your device. Only the intended recipient can decrypt it.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(232,121,249,0.1);">⚡</div>
+                <h3>Real-Time Messaging</h3>
+                <p>Instant message delivery using WebSocket technology. See when contacts are typing and get read receipts.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(244,114,182,0.1);">🛡️</div>
+                <h3>Zero Knowledge</h3>
+                <p>We can't read your messages even if we wanted to. Your keys never leave your device.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(139,92,246,0.1);">📱</div>
+                <h3>Cross-Platform</h3>
+                <p>Access your secure chats from any device with a web browser. No app installation required.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(167,139,250,0.1);">👥</div>
+                <h3>Contact Management</h3>
+                <p>Easily add, organize, and manage your contacts. Set custom nicknames and see online status.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(192,132,252,0.1);">📊</div>
+                <h3>Admin Dashboard</h3>
+                <p>Comprehensive admin panel with user management, analytics, and security monitoring tools.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="security" id="security">
+        <div class="security-content">
+            <div class="security-left">
+                <h2>How Our <span class="gradient-text">Encryption</span> Works</h2>
+                <p>ValuChat uses a multi-layered security approach to protect your communications at every step.</p>
+
+                <div class="step">
+                    <div class="step-num" style="background: rgba(168,85,247,0.1); color: #a855f7;">1</div>
+                    <div>
+                        <h4>Key Generation</h4>
+                        <p>Your browser generates a unique 256-bit AES key using cryptographically secure random number generation.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num" style="background: rgba(232,121,249,0.1); color: #e879f9;">2</div>
+                    <div>
+                        <h4>Message Encryption</h4>
+                        <p>Messages are encrypted with AES-GCM, providing both confidentiality and authentication.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num" style="background: rgba(244,114,182,0.1); color: #f472b6;">3</div>
+                    <div>
+                        <h4>Secure Transmission</h4>
+                        <p>Encrypted messages travel over TLS/SSL channels, adding another layer of transport security.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num" style="background: rgba(139,92,246,0.1); color: #8b5cf6;">4</div>
+                    <div>
+                        <h4>Client-Side Decryption</h4>
+                        <p>Only the recipient's browser can decrypt the message using their private key. The server sees only ciphertext.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="security-right">
+                <div class="security-card">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <div style="font-size: 48px; margin-bottom: 10px;">🔐</div>
+                        <h3>Security Architecture</h3>
+                    </div>
+                    <div class="security-row"><span>Encryption Algorithm</span><span>AES-256-GCM</span></div>
+                    <div class="security-row"><span>Key Derivation</span><span>PBKDF2-SHA256</span></div>
+                    <div class="security-row"><span>Transport Security</span><span>TLS 1.3</span></div>
+                    <div class="security-row"><span>Salt Length</span><span>128-bit</span></div>
+                    <div class="security-row"><span>Nonce Length</span><span>96-bit</span></div>
+                    <div class="security-row"><span>Iterations</span><span>100,000</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta" id="download">
+        <div class="cta-content">
+            <h2>Ready to Chat <span class="gradient-text">Securely</span>?</h2>
+            <p>Join thousands of users who trust ValuChat for their private conversations. No credit card required. No data collection.</p>
+            <a href="/register" class="btn btn-primary btn-lg" style="font-size: 18px; padding: 16px 48px;">Create Free Account</a>
+            <p style="margin-top: 20px; font-size: 13px; color: var(--text-dim);">Already have an account? <a href="/login" style="color: var(--primary-light); text-decoration: none;">Log in here</a></p>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-content">
+            <div class="logo">
+                <div class="logo-icon" style="width: 36px; height: 36px; font-size: 16px; border-radius: 10px;">V</div>
+                <div class="logo-text" style="font-size: 18px;">Valu<span>Chat</span></div>
+            </div>
+            <div class="footer-links">
+                <a href="#">Privacy Policy</a>
+                <a href="#">Terms of Service</a>
+                <a href="#">Security</a>
+                <a href="#">Contact</a>
+            </div>
+            <div class="copyright">© 2026 ValuChat. All rights reserved.</div>
+        </div>
+    </footer>
+
+    <script>
+        const particlesContainer = document.getElementById('particles');
+        for (let i = 0; i < 30; i++) {
+            const particle = document.createElement('div');
+            particle.className = 'particle';
+            particle.style.left = Math.random() * 100 + '%';
+            particle.style.animationDelay = Math.random() * 15 + 's';
+            particle.style.animationDuration = (10 + Math.random() * 10) + 's';
+            particlesContainer.appendChild(particle);
+        }
+
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) target.scrollIntoView({ behavior: 'smooth' });
+            });
+        });
+
+        setTimeout(() => {
+            document.querySelectorAll('.flash').forEach(f => {
+                f.style.transition = 'opacity 0.5s';
+                f.style.opacity = '0';
+                setTimeout(() => f.remove(), 500);
+            });
+        }, 4000);
+    </script>
+</body>
+</html>

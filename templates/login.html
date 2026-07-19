@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - ValuChat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #a855f7;
+            --primary-light: #c084fc;
+            --primary-dark: #7c3aed;
+            --accent: #e879f9;
+            --accent-warm: #f472b6;
+            --bg: #0f0518;
+            --bg-elevated: #1a0b2e;
+            --bg-card: #241038;
+            --text: #f3e8ff;
+            --text-muted: #c4b5fd;
+            --text-dim: #8b5cf6;
+            --border: rgba(168,85,247,0.15);
+            --gradient: linear-gradient(135deg, #a855f7, #e879f9);
+            --glow: 0 0 40px rgba(168,85,247,0.2);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; }
+
+        .left-panel { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 60px; position: relative; overflow: hidden; }
+        .left-panel::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(circle at 30% 50%, rgba(168,85,247,0.1) 0%, transparent 50%), radial-gradient(circle at 70% 50%, rgba(232,121,249,0.06) 0%, transparent 50%); }
+
+        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; position: relative; z-index: 1; }
+        .logo-icon { width: 42px; height: 42px; background: var(--gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; color: #fff; box-shadow: 0 0 20px rgba(168,85,247,0.4); }
+        .logo-text { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+        .logo-text span { color: var(--primary-light); }
+
+        .form-container { width: 100%; max-width: 400px; position: relative; z-index: 1; }
+        .form-container h1 { font-size: 32px; font-weight: 800; margin-bottom: 8px; }
+        .form-container p { color: var(--text-muted); font-size: 15px; margin-bottom: 32px; }
+
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 14px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+        .form-group input { width: 100%; padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 15px; font-family: 'Inter', sans-serif; transition: all 0.3s; }
+        .form-group input:focus { outline: none; border-color: var(--primary); background: rgba(168,85,247,0.05); box-shadow: 0 0 15px rgba(168,85,247,0.1); }
+        .form-group input::placeholder { color: var(--text-dim); }
+
+        .btn { width: 100%; padding: 14px; background: var(--gradient); color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.3s; font-family: 'Inter', sans-serif; box-shadow: 0 4px 20px rgba(168,85,247,0.3); }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(168,85,247,0.5); }
+
+        .divider { display: flex; align-items: center; gap: 16px; margin: 24px 0; color: var(--text-dim); font-size: 13px; }
+        .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+        .register-link { text-align: center; margin-top: 24px; font-size: 14px; color: var(--text-muted); }
+        .register-link a { color: var(--primary-light); text-decoration: none; font-weight: 600; }
+        .register-link a:hover { text-decoration: underline; }
+
+        .right-panel { flex: 1; background: linear-gradient(135deg, rgba(168,85,247,0.05), rgba(232,121,249,0.05)); display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 60px; position: relative; overflow: hidden; }
+        .right-panel::before { content: ''; position: absolute; width: 400px; height: 400px; background: radial-gradient(circle, rgba(168,85,247,0.12) 0%, transparent 70%); top: 20%; left: 20%; }
+
+        .security-info { max-width: 400px; position: relative; z-index: 1; }
+        .security-info h2 { font-size: 28px; font-weight: 700; margin-bottom: 20px; }
+        .security-item { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 24px; }
+        .security-icon { width: 44px; height: 44px; background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+        .security-item h4 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+        .security-item p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+
+        .flash { padding: 14px 20px; border-radius: 10px; margin-bottom: 20px; font-size: 14px; font-weight: 500; }
+        .flash-success { background: rgba(168,85,247,0.15); border: 1px solid rgba(168,85,247,0.3); color: var(--primary-light); }
+        .flash-error { background: rgba(244,114,182,0.15); border: 1px solid rgba(244,114,182,0.3); color: var(--accent-warm); }
+
+        @media (max-width: 900px) {
+            .right-panel { display: none; }
+            .left-panel { padding: 40px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="left-panel">
+        <div class="logo">
+            <div class="logo-icon">V</div>
+            <div class="logo-text">Valu<span>Chat</span></div>
+        </div>
+
+        <div class="form-container">
+            <h1>Welcome back</h1>
+            <p>Enter your credentials to access your secure messages</p>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+            {% endwith %}
+
+            <form method="POST" action="/login">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" placeholder="Enter your username" required autofocus autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn">Sign In</button>
+            </form>
+
+            <div class="divider">or</div>
+
+            <div class="register-link">
+                Don't have an account? <a href="/register">Create one</a>
+            </div>
+            <div class="register-link" style="margin-top: 12px;">
+                <a href="/" style="color: var(--text-dim);">← Back to home</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="right-panel">
+        <div class="security-info">
+            <h2>🔐 Your Privacy Matters</h2>
+            <div class="security-item">
+                <div class="security-icon">🔒</div>
+                <div>
+                    <h4>End-to-End Encryption</h4>
+                    <p>All messages are encrypted with AES-256-GCM before leaving your device.</p>
+                </div>
+            </div>
+            <div class="security-item">
+                <div class="security-icon">🛡️</div>
+                <div>
+                    <h4>Zero Knowledge</h4>
+                    <p>We cannot read your messages. Your keys never leave your browser.</p>
+                </div>
+            </div>
+            <div class="security-item">
+                <div class="security-icon">⚡</div>
+                <div>
+                    <h4>Real-Time Delivery</h4>
+                    <p>Instant messaging with WebSocket technology for seamless communication.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
