@@ -98,6 +98,7 @@ csrf = CSRFProtect(app)
 
 # Exempt API routes that use JSON (not HTML forms) from CSRF
 # SocketIO events handle their own auth via session
+csrf.exempt('app.setup_keys')
 csrf.exempt('app.add_contact')
 csrf.exempt('app.accept_message_request')
 csrf.exempt('app.decline_message_request')
@@ -147,6 +148,30 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 online_users = {}
 
 # ==================== DATABASE ====================
+def _migrate_schema(cursor):
+    """
+    Add columns needed for the per-user (not per-conversation-PIN) key
+    system, without wiping any existing database:
+    - users.private_key_nonce: AES-GCM nonce used when wrapping a user's
+      private key with their own PIN-derived key. (users.salt already
+      existed and now holds the PBKDF2 salt for that wrap; users.public_key
+      / private_key_encrypted already existed too.)
+    - messages/message_requests.encrypted_key_sender /
+      encrypted_key_receiver: the random per-message AES key, RSA-wrapped
+      once for the sender's own public key and once for the receiver's, so
+      each side can decrypt using only their own private key.
+    """
+    def add_column_if_missing(table, column, coltype):
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cursor.fetchall()}
+        if column not in existing:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+    add_column_if_missing('users', 'private_key_nonce', 'TEXT')
+    for table in ('messages', 'message_requests'):
+        add_column_if_missing(table, 'encrypted_key_sender', 'TEXT')
+        add_column_if_missing(table, 'encrypted_key_receiver', 'TEXT')
+
 def get_db():
     db_path = app.config['DATABASE']
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -252,6 +277,10 @@ def init_db():
 
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_requests_receiver ON message_requests(receiver_id, status)")
 
+    conn.commit()
+    _migrate_schema(cursor)
+    conn.commit()
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS blocked_users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -312,9 +341,6 @@ def derive_key(password: str, salt: bytes) -> bytes:
         iterations=100000,
     )
     return kdf.derive(password.encode())
-
-def generate_key_pair():
-    return secrets.token_hex(32)
 
 def encrypt_message(message: str, key: bytes) -> dict:
     aesgcm = AESGCM(key)
@@ -417,17 +443,19 @@ def register():
             return render_template('register.html')
 
         password_hash = generate_password_hash(password)
-        salt = secrets.token_hex(16)
-        private_key = generate_key_pair()
-        public_key = generate_key_pair()
 
         conn = get_db()
         cursor = conn.cursor()
         try:
+            # public_key / private_key_encrypted / salt / private_key_nonce
+            # are left NULL here on purpose. A real RSA keypair is generated
+            # in the browser the first time this user sets their PIN (see
+            # /api/keys/setup) - the private key must never pass through the
+            # server unencrypted, so it can't be created at registration time.
             cursor.execute("""
-                INSERT INTO users (username, email, password_hash, display_name, public_key, private_key_encrypted, salt)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (username, email, password_hash, display_name or username, public_key, private_key, salt))
+                INSERT INTO users (username, email, password_hash, display_name)
+                VALUES (?, ?, ?, ?)
+            """, (username, email, password_hash, display_name or username))
             conn.commit()
             flash('Account created successfully! Please login.', 'success')
             return redirect(url_for('login'))
@@ -486,6 +514,73 @@ def get_user():
             'public_key': user['public_key']
         })
     return jsonify({'error': 'User not found'}), 404
+
+@app.route('/api/keys/setup', methods=['POST'])
+def setup_keys():
+    """
+    Called once (and again whenever the user changes their PIN) from the
+    browser. The private key never arrives here in usable form - only an
+    AES-GCM ciphertext of it, wrapped with a key derived from the user's
+    own PIN. The server just stores the blob; it cannot decrypt it.
+    """
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    public_key = data.get('public_key')
+    private_key_encrypted = data.get('private_key_encrypted')
+    private_key_nonce = data.get('private_key_nonce')
+    salt = data.get('salt')
+
+    if not all([public_key, private_key_encrypted, private_key_nonce, salt]):
+        return jsonify({'error': 'public_key, private_key_encrypted, private_key_nonce and salt are all required'}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE users
+        SET public_key = ?, private_key_encrypted = ?, private_key_nonce = ?, salt = ?
+        WHERE id = ?
+    """, (public_key, private_key_encrypted, private_key_nonce, salt, session['user_id']))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/keys/mine')
+def get_my_keys():
+    """
+    Returns the *current* user's own wrapped private key material so the
+    browser can attempt to unwrap it with a freshly-entered PIN. Never
+    returns another user's private_key_encrypted/salt/nonce - only their
+    public_key (via /api/contacts, /api/search-users, /api/user) is ever
+    shared, since that's the only part of anyone else's key that's meant
+    to leave their device.
+    """
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT public_key, private_key_encrypted, private_key_nonce, salt
+        FROM users WHERE id = ?
+    """, (session['user_id'],))
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify({
+        'public_key': user['public_key'],
+        'private_key_encrypted': user['private_key_encrypted'],
+        'private_key_nonce': user['private_key_nonce'],
+        'salt': user['salt'],
+        'has_keys': bool(user['private_key_encrypted'])
+    })
+
 
 @app.route('/api/contacts')
 def get_contacts():
@@ -602,6 +697,8 @@ def get_messages(contact_id):
             'encrypted_content': m['encrypted_content'],
             'nonce': m['nonce'],
             'salt': m['salt'],
+            'encrypted_key_sender': m['encrypted_key_sender'],
+            'encrypted_key_receiver': m['encrypted_key_receiver'],
             'timestamp': m['timestamp'],
             'is_read': m['is_read'],
             'message_type': m['message_type'],
@@ -698,8 +795,13 @@ def handle_send_message(data):
     encrypted_content = data.get('encrypted_content')
     nonce = data.get('nonce')
     salt = data.get('salt')
+    # The AES key used for this one message, RSA-wrapped separately for the
+    # sender's own public key and the receiver's public key, so each side
+    # can unlock it later using only their own PIN-protected private key.
+    encrypted_key_sender = data.get('encrypted_key_sender')
+    encrypted_key_receiver = data.get('encrypted_key_receiver')
 
-    if not all([receiver_id, encrypted_content, nonce, salt]):
+    if not all([receiver_id, encrypted_content, nonce, salt, encrypted_key_sender, encrypted_key_receiver]):
         emit('error', {'message': 'Missing message data'})
         return
 
@@ -733,9 +835,9 @@ def handle_send_message(data):
 
     if is_contact:
         cursor.execute("""
-            INSERT INTO messages (sender_id, receiver_id, encrypted_content, nonce, salt)
-            VALUES (?, ?, ?, ?, ?)
-        """, (session['user_id'], receiver_id, encrypted_content, nonce, salt))
+            INSERT INTO messages (sender_id, receiver_id, encrypted_content, nonce, salt, encrypted_key_sender, encrypted_key_receiver)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session['user_id'], receiver_id, encrypted_content, nonce, salt, encrypted_key_sender, encrypted_key_receiver))
         message_id = cursor.lastrowid
         conn.commit()
 
@@ -751,6 +853,8 @@ def handle_send_message(data):
             'encrypted_content': encrypted_content,
             'nonce': nonce,
             'salt': salt,
+            'encrypted_key_sender': encrypted_key_sender,
+            'encrypted_key_receiver': encrypted_key_receiver,
             'timestamp': datetime.now().isoformat(),
             'is_request': False
         }
@@ -780,9 +884,9 @@ def handle_send_message(data):
         }, room='admin_room')
     else:
         cursor.execute("""
-            INSERT INTO message_requests (sender_id, receiver_id, encrypted_content, nonce, salt)
-            VALUES (?, ?, ?, ?, ?)
-        """, (session['user_id'], receiver_id, encrypted_content, nonce, salt))
+            INSERT INTO message_requests (sender_id, receiver_id, encrypted_content, nonce, salt, encrypted_key_sender, encrypted_key_receiver)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session['user_id'], receiver_id, encrypted_content, nonce, salt, encrypted_key_sender, encrypted_key_receiver))
         request_id = cursor.lastrowid
         conn.commit()
 
@@ -798,6 +902,8 @@ def handle_send_message(data):
             'encrypted_content': encrypted_content,
             'nonce': nonce,
             'salt': salt,
+            'encrypted_key_sender': encrypted_key_sender,
+            'encrypted_key_receiver': encrypted_key_receiver,
             'timestamp': datetime.now().isoformat(),
             'is_request': True
         }
@@ -841,6 +947,8 @@ def get_message_requests():
         'encrypted_content': r['encrypted_content'],
         'nonce': r['nonce'],
         'salt': r['salt'],
+        'encrypted_key_sender': r['encrypted_key_sender'],
+        'encrypted_key_receiver': r['encrypted_key_receiver'],
         'timestamp': r['timestamp'],
         'status': r['status'],
         'file_url': r['file_url'],
@@ -895,10 +1003,10 @@ def accept_message_request(request_id):
     """, (req['sender_id'], session['user_id'], None))
 
     cursor.execute("""
-        INSERT INTO messages (sender_id, receiver_id, encrypted_content, nonce, salt, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (req['sender_id'], session['user_id'], req['encrypted_content'], 
-          req['nonce'], req['salt'], req['timestamp']))
+        INSERT INTO messages (sender_id, receiver_id, encrypted_content, nonce, salt, encrypted_key_sender, encrypted_key_receiver, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (req['sender_id'], session['user_id'], req['encrypted_content'],
+          req['nonce'], req['salt'], req['encrypted_key_sender'], req['encrypted_key_receiver'], req['timestamp']))
 
     cursor.execute("""
         UPDATE message_requests SET status = 'accepted' WHERE id = ?

@@ -342,12 +342,23 @@
 
     <script>
         // ============================================
-        // PIN-BASED ENCRYPTION SYSTEM
+        // PER-USER ENCRYPTION SYSTEM (PIN protects YOUR OWN key only)
         // ============================================
-        // User sets a PIN on first chat open. The PIN derives a master key.
-        // All conversation keys are derived from the master key + contact ID.
-        // On reload, user re-enters PIN to restore the same master key.
-        // No keys stored in localStorage - everything is deterministic from PIN.
+        // Each account has its own RSA-OAEP keypair, generated in-browser.
+        // The public key is stored server-side (public keys are meant to be
+        // shared). The private key is encrypted with a key derived from
+        // this account's own PIN and stored server-side as ciphertext only
+        // - the server/DB never sees the PIN or the plaintext private key.
+        //
+        // Every message is encrypted with a fresh random AES-256 key, which
+        // is then RSA-wrapped twice: once with the recipient's public key,
+        // once with the sender's own public key. That means:
+        //   - your PIN only ever has to match YOUR OWN previous PIN
+        //   - it unlocks your private key, which can unwrap the copy of
+        //     every message key that was wrapped for you - both messages
+        //     you sent and messages you received
+        //   - there is no "the other person must use the same PIN" - two
+        //     people never need to agree on or share a PIN at all
 
         const ENC = {
             abToBase64: (buffer) => {
@@ -362,20 +373,13 @@
                 for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
                 return bytes.buffer;
             },
-            deriveKeyFromPassword: async (password, salt) => {
+            deriveWrappingKey: async (pin, saltB64) => {
                 const encoder = new TextEncoder();
-                const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
+                const salt = new Uint8Array(ENC.base64ToAb(saltB64));
+                const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(pin), 'PBKDF2', false, ['deriveKey']);
                 return crypto.subtle.deriveKey(
-                    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+                    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
                     keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-                );
-            },
-            deriveRawKey: async (password, salt) => {
-                const encoder = new TextEncoder();
-                const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
-                return crypto.subtle.deriveBits(
-                    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
-                    keyMaterial, 256
                 );
             },
             encrypt: async (text, key) => {
@@ -390,16 +394,32 @@
                 const encrypted = ENC.base64ToAb(ciphertext);
                 const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
                 return new TextDecoder().decode(decrypted);
+            },
+            // Generate a brand-new random AES-256 key for one message
+            generateMessageKey: async () => {
+                return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+            },
+            wrapKeyWithPublicKey: async (aesKey, publicKeyJwk) => {
+                const rawKey = await crypto.subtle.exportKey('raw', aesKey);
+                const pubKey = await crypto.subtle.importKey(
+                    'jwk', publicKeyJwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']
+                );
+                const wrapped = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, pubKey, rawKey);
+                return ENC.abToBase64(wrapped);
+            },
+            unwrapKeyWithPrivateKey: async (wrappedB64, privateKey) => {
+                const wrapped = ENC.base64ToAb(wrappedB64);
+                const rawKey = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, wrapped);
+                return crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
             }
         };
 
         // ============================================
-        // MASTER KEY MANAGEMENT (PIN-based)
+        // KEYPAIR MANAGEMENT (per-account, PIN-protected)
         // ============================================
-        let masterKey = null;      // The AES key derived from PIN
-        let masterKeyRaw = null;   // Raw bytes of master key for sub-key derivation
-        let sharedKeys = {};       // Cache of conversation keys
-        let conversationCodes = {}; // Cache of short "safety codes" per contact, for PIN-match verification
+        let myPrivateKey = null;   // This account's RSA private key, only in memory, only after PIN unlock
+        let myPublicKeyJwk = null; // This account's RSA public key (JWK)
+        let publicKeyCache = {};   // contactId -> their public key JWK
         let pinVerified = false;
 
         // The PIN system relies on the Web Crypto API (crypto.subtle), which
@@ -411,66 +431,82 @@
             return !!(window.crypto && window.crypto.subtle);
         }
 
-        // Derive master key from PIN using a fixed salt
-        async function deriveMasterKey(pin) {
-            const fixedSalt = new Uint8Array([118, 97, 108, 117, 99, 104, 97, 116, 45, 109, 97, 115, 116, 101, 114, 45]); // "valuchat-master-"
-            const key = await ENC.deriveKeyFromPassword(pin, fixedSalt);
-            const rawBits = await ENC.deriveRawKey(pin, fixedSalt);
-            return { key, raw: new Uint8Array(rawBits) };
+        // First-time setup: generate a real RSA-OAEP keypair, wrap the
+        // private key with a key derived from the PIN + a random salt, and
+        // upload {public_key, private_key_encrypted, private_key_nonce, salt}.
+        async function createKeysForPin(pin) {
+            const keyPair = await crypto.subtle.generateKey(
+                { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+                true, ['encrypt', 'decrypt']
+            );
+            const publicJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+            const privateJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+
+            const salt = crypto.getRandomValues(new Uint8Array(16));
+            const saltB64 = ENC.abToBase64(salt.buffer);
+            const wrappingKey = await ENC.deriveWrappingKey(pin, saltB64);
+            const { ciphertext, nonce } = await ENC.encrypt(JSON.stringify(privateJwk), wrappingKey);
+
+            const res = await fetch('/api/keys/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    public_key: JSON.stringify(publicJwk),
+                    private_key_encrypted: ciphertext,
+                    private_key_nonce: nonce,
+                    salt: saltB64
+                })
+            });
+            if (!res.ok) throw new Error('Failed to save keys to server');
+
+            myPrivateKey = keyPair.privateKey;
+            myPublicKeyJwk = publicJwk;
         }
 
-        // Derive a conversation-specific key from master key + contact IDs
-        async function deriveConversationKey(contactId) {
-            if (!masterKey || !masterKeyRaw) {
-                throw new Error('Master key not available - PIN required');
+        // Returning user: fetch this account's wrapped private key, derive
+        // the wrapping key from the PIN just entered, and try to unwrap.
+        // If the PIN is wrong, AES-GCM decryption itself fails (auth tag
+        // mismatch) - that failure IS the "wrong PIN" check, there's no
+        // separate comparison needed.
+        async function unlockKeysWithPin(pin) {
+            const res = await fetch('/api/keys/mine');
+            if (!res.ok) throw new Error('Failed to fetch key info');
+            const info = await res.json();
+
+            if (!info.has_keys) {
+                // No keys on this account yet (e.g. pre-migration account) -
+                // treat like first-time setup.
+                await createKeysForPin(pin);
+                return;
             }
-            if (sharedKeys[contactId]) return sharedKeys[contactId];
 
-            // Deterministic conversation ID from sorted user IDs
-            const ids = [currentUser.id.toString(), contactId.toString()].sort();
-            const conversationId = ids.join(':');
-
-            // Derive conversation salt: HMAC-SHA256(masterKey, conversationId) -> take first 16 bytes
-            const encoder = new TextEncoder();
-            const convData = encoder.encode(conversationId);
-            const hmacKey = await crypto.subtle.importKey(
-                'raw', masterKeyRaw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+            const wrappingKey = await ENC.deriveWrappingKey(pin, info.salt);
+            const privateJwkStr = await ENC.decrypt(info.private_key_encrypted, info.private_key_nonce, wrappingKey);
+            const privateJwk = JSON.parse(privateJwkStr);
+            myPrivateKey = await crypto.subtle.importKey(
+                'jwk', privateJwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['decrypt']
             );
-            const saltFull = await crypto.subtle.sign('HMAC', hmacKey, convData);
-            const salt = new Uint8Array(saltFull).slice(0, 16);
+            myPublicKeyJwk = JSON.parse(info.public_key);
+        }
 
-            // Human-comparable "safety code" for this conversation. It's just a
-            // short hex slice of the same salt above, which only comes out the
-            // same on both devices if masterKeyRaw (i.e. the PIN) matches too.
-            // This lets two people confirm - by eye, out loud, however - that
-            // they're using the same PIN, *before* relying on message content.
-            const codeHex = Array.from(salt.slice(0, 2)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-            conversationCodes[contactId] = codeHex;
-
-            // Derive conversation key: PBKDF2(masterKey as password, conversation salt)
-            // We use the raw master key bits as the "password" for PBKDF2
-            const keyMaterial = await crypto.subtle.importKey(
-                'raw', masterKeyRaw, 'PBKDF2', false, ['deriveBits', 'deriveKey']
-            );
-            const convKey = await crypto.subtle.deriveKey(
-                { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
-                keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-            );
-
-            sharedKeys[contactId] = convKey;
-            return convKey;
+        // Look up a contact's public key (from the already-fetched contacts
+        // list / search results), parsed once and cached.
+        function getContactPublicKeyJwk(contactId) {
+            if (publicKeyCache[contactId]) return publicKeyCache[contactId];
+            const contact = contacts.find(c => c.id == contactId);
+            if (!contact || !contact.public_key) return null;
+            try {
+                const jwk = JSON.parse(contact.public_key);
+                publicKeyCache[contactId] = jwk;
+                return jwk;
+            } catch (e) {
+                return null; // legacy/placeholder public_key from before this system existed
+            }
         }
 
         // ============================================
         // PIN MODAL
         // ============================================
-        // PIN hash key is scoped to the logged-in user's id so two different
-        // accounts logged in on the same browser never collide/overwrite
-        // each other's stored PIN hash.
-        function pinStorageKey() {
-            return `valuchat_pin_hash_${currentUser.id}`;
-        }
-
         function showPinModal(isFirstTime = false) {
             const existing = document.getElementById('pinModal');
             if (existing) existing.remove();
@@ -499,8 +535,8 @@
                     <h2 style="font-size:24px;font-weight:800;margin-bottom:8px;">${isFirstTime ? 'Set Your PIN' : 'Enter Your PIN'}</h2>
                     <p style="color:var(--text-muted);font-size:14px;margin-bottom:24px;line-height:1.5;">
                         ${isFirstTime 
-                            ? 'Create a PIN to encrypt your messages.<br><b>Remember this PIN!</b> You will need it to restore your chat history.<br><br><b>Important:</b> the person you\'re chatting with must use the <u>same PIN</u> as you, or your messages to each other cannot be decrypted.' 
-                            : 'Enter your PIN to restore your encrypted chat history.'}
+                            ? 'Create a PIN to encrypt your messages.<br><b>Remember this PIN!</b> You will need it to restore your chat history.<br><br>This PIN is just for your account - the person you\'re chatting with sets their own PIN separately. You never need to agree on a matching PIN.' 
+                            : 'Enter your PIN to unlock your account and restore your chat history (both messages you sent and received).'}
                     </p>
                     <input type="password" id="pinInput" maxlength="6" placeholder="${isFirstTime ? 'Create 6-digit PIN' : 'Your 6-digit PIN'}" 
                         style="width:100%;padding:16px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-size:20px;text-align:center;letter-spacing:8px;font-weight:700;outline:none;transition:all 0.3s;margin-bottom:16px;"
@@ -614,35 +650,17 @@
                 return;
             }
 
-            // Everything below touches the Web Crypto API - wrap it all so any
-            // failure surfaces a real error instead of leaving the modal stuck.
-            try {
-                if (isFirstTime && pinConfirm) {
-                    if (pin !== pinConfirm.value) {
-                        alert('PINs do not match!');
-                        return;
-                    }
-                    // Store a hash of the PIN to verify on next login (not the PIN itself!)
-                    const pinHash = await hashPin(pin);
-                    localStorage.setItem(pinStorageKey(), pinHash);
-                } else {
-                    // Verify PIN against stored hash
-                    const storedHash = localStorage.getItem(pinStorageKey());
-                    if (storedHash) {
-                        const inputHash = await hashPin(pin);
-                        if (inputHash !== storedHash) {
-                            alert('Incorrect PIN. Please try again.');
-                            document.getElementById('pinInput').value = '';
-                            document.getElementById('pinInput').focus();
-                            return;
-                        }
-                    }
-                }
+            if (isFirstTime && pinConfirm && pin !== pinConfirm.value) {
+                alert('PINs do not match!');
+                return;
+            }
 
-                // Derive master key from PIN
-                const result = await deriveMasterKey(pin);
-                masterKey = result.key;
-                masterKeyRaw = result.raw;
+            try {
+                if (isFirstTime) {
+                    await createKeysForPin(pin);
+                } else {
+                    await unlockKeysWithPin(pin);
+                }
                 pinVerified = true;
 
                 // Remove modal
@@ -650,12 +668,8 @@
                 if (modal) modal.remove();
                 hideRestoreHistoryIcon();
 
-                // Now derive all conversation keys and load messages
-                await restoreAllConversationKeys();
-
                 // If a contact is selected, reload their messages
                 if (currentContact) {
-                    updateEncryptionBadge(currentContact.id);
                     await loadMessages(currentContact.id);
                 } else {
                     // Restore the conversation the user was last viewing before reload
@@ -667,26 +681,33 @@
 
                 showToast('Messages Unlocked', 'Your chat history has been restored.', 'success');
             } catch (e) {
-                console.error('Failed to derive master key:', e);
-                alert('Failed to unlock messages. Please try again.');
+                console.error('Failed to unlock keys:', e);
+                if (!isFirstTime) {
+                    // AES-GCM decrypt throws on auth-tag mismatch - that's
+                    // exactly what happens when the wrong PIN is entered.
+                    alert('Incorrect PIN. Please try again.');
+                    document.getElementById('pinInput').value = '';
+                    document.getElementById('pinInput').focus();
+                } else {
+                    alert('Failed to set up your PIN. Please try again.');
+                }
             }
         }
 
         function updateEncryptionBadge(contactId) {
             const label = document.getElementById('encryptionCodeLabel');
             if (!label) return;
-            const code = conversationCodes[contactId];
-            label.textContent = code ? `Code: ${code}` : 'End-to-End Encrypted';
+            const contact = contacts.find(c => c.id == contactId);
+            const theyHaveKeys = contact && !!getContactPublicKeyJwk(contactId);
+            label.textContent = theyHaveKeys ? 'End-to-End Encrypted' : 'Waiting for their PIN setup';
         }
 
-        // Explains the safety code and gives a one-tap way to reset a
-        // mismatched PIN. This is the main debugging tool for "both PINs
-        // were entered correctly but messages still won't decrypt" - that
-        // almost always means the two people typed *different* PINs, since
-        // ValuChat's encryption key is a shared secret between them, not a
-        // private per-account key.
+        // Explains how the encryption works now and offers to change your
+        // own PIN. Each person's PIN only protects their own private key,
+        // so there's nothing here to "match" with the other person anymore.
         function showEncryptionInfo() {
-            const code = currentContact ? conversationCodes[currentContact.id] : null;
+            const contact = currentContact;
+            const theyHaveKeys = contact && !!getContactPublicKeyJwk(contact.id);
             const existing = document.getElementById('encInfoModal');
             if (existing) existing.remove();
 
@@ -696,56 +717,95 @@
             modal.innerHTML = `
                 <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:32px;width:100%;max-width:380px;box-shadow:var(--glow);text-align:center;">
                     <div style="font-size:40px;margin-bottom:12px;">🔐</div>
-                    <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;">Safety Code${code ? `: ${code}` : ''}</h2>
+                    <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;">End-to-End Encrypted</h2>
                     <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px;line-height:1.6;">
-                        ${code
-                            ? `This code is generated from your PIN. Ask the other person to open this same screen for your conversation.<br><br><b>If their code also shows ${code}, you're both using the same PIN</b> and messages will decrypt fine.<br><br>If their code is different, one of you set a different PIN - use "Change my PIN" below and agree on the same one.`
-                            : 'Select a contact first to see this conversation\'s safety code.'}
+                        Every message is encrypted with its own random key. That key is locked separately for you and for the other person, using each person's own public key - so only your PIN can unlock your copy, and only theirs can unlock theirs.
+                        ${contact && !theyHaveKeys ? '<br><br><b>Heads up:</b> this contact hasn\'t set up their PIN yet, so new messages to them can\'t be encrypted until they do.' : ''}
                     </p>
-                    <button onclick="resetPin()" style="width:100%;padding:14px;background:var(--gradient);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;">Change My PIN</button>
+                    <button onclick="closeEncInfoAndShowChangePin()" style="width:100%;padding:14px;background:var(--gradient);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;">Change My PIN</button>
                     <button onclick="document.getElementById('encInfoModal').remove()" style="width:100%;padding:12px;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;">Close</button>
                 </div>
             `;
             document.body.appendChild(modal);
         }
 
-        // Clears this account's locally-stored PIN so the "set PIN" modal
-        // reappears, letting the user pick a new PIN that actually matches
-        // their contact's - without needing to log out or clear the browser.
-        function resetPin() {
-            const sure = confirm('This resets your local PIN. You\'ll set a new one immediately - make sure you and the other person agree on the same PIN. Continue?');
-            if (!sure) return;
-
-            const existingModal = document.getElementById('encInfoModal');
-            if (existingModal) existingModal.remove();
-
-            localStorage.removeItem(pinStorageKey());
-            masterKey = null;
-            masterKeyRaw = null;
-            pinVerified = false;
-            sharedKeys = {};
-            conversationCodes = {};
-            updateEncryptionBadge(currentContact ? currentContact.id : null);
-
-            showPinModal(true);
+        function closeEncInfoAndShowChangePin() {
+            const existing = document.getElementById('encInfoModal');
+            if (existing) existing.remove();
+            showChangePinModal();
         }
 
-        async function hashPin(pin) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode('valuchat-pin-verify:' + pin);
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            return ENC.abToBase64(hash);
+        // Re-wraps your EXISTING private key under a new PIN. This does NOT
+        // regenerate your keypair, so none of your message history becomes
+        // unreadable - only the PIN needed to unlock it changes.
+        function showChangePinModal() {
+            const existing = document.getElementById('changePinModal');
+            if (existing) existing.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'changePinModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
+            modal.innerHTML = `
+                <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:40px;width:100%;max-width:380px;box-shadow:var(--glow);text-align:center;">
+                    <button onclick="document.getElementById('changePinModal').remove()" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:none;background:var(--bg-card);color:var(--text-muted);font-size:16px;cursor:pointer;">✕</button>
+                    <div style="font-size:48px;margin-bottom:16px;">🔐</div>
+                    <h2 style="font-size:22px;font-weight:800;margin-bottom:16px;">Change My PIN</h2>
+                    <input type="password" id="oldPinInput" maxlength="6" placeholder="Current PIN"
+                        style="width:100%;padding:14px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-size:18px;text-align:center;letter-spacing:6px;font-weight:700;outline:none;margin-bottom:12px;">
+                    <input type="password" id="newPinInput" maxlength="6" placeholder="New PIN"
+                        style="width:100%;padding:14px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-size:18px;text-align:center;letter-spacing:6px;font-weight:700;outline:none;margin-bottom:12px;">
+                    <input type="password" id="newPinConfirmInput" maxlength="6" placeholder="Confirm New PIN"
+                        style="width:100%;padding:14px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;color:var(--text);font-size:18px;text-align:center;letter-spacing:6px;font-weight:700;outline:none;margin-bottom:20px;">
+                    <button onclick="submitChangePin()" style="width:100%;padding:14px;background:var(--gradient);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;">Update PIN</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            modal.querySelectorAll('input').forEach(el => {
+                el.addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); });
+            });
         }
 
-        async function restoreAllConversationKeys() {
-            if (!masterKey) return;
-            // Derive keys for all contacts
-            for (const contact of contacts) {
-                try {
-                    await deriveConversationKey(contact.id);
-                } catch (e) {
-                    console.warn('Failed to derive key for contact', contact.id, e);
-                }
+        async function submitChangePin() {
+            const oldPin = document.getElementById('oldPinInput').value;
+            const newPin = document.getElementById('newPinInput').value;
+            const newPinConfirm = document.getElementById('newPinConfirmInput').value;
+
+            if (newPin.length < 4) { alert('New PIN must be at least 4 digits'); return; }
+            if (newPin !== newPinConfirm) { alert('New PINs do not match'); return; }
+
+            try {
+                const res = await fetch('/api/keys/mine');
+                if (!res.ok) throw new Error('Failed to fetch key info');
+                const info = await res.json();
+
+                const oldWrappingKey = await ENC.deriveWrappingKey(oldPin, info.salt);
+                // If oldPin is wrong, this throws - that's our validation.
+                const privateJwkStr = await ENC.decrypt(info.private_key_encrypted, info.private_key_nonce, oldWrappingKey);
+
+                const newSalt = crypto.getRandomValues(new Uint8Array(16));
+                const newSaltB64 = ENC.abToBase64(newSalt.buffer);
+                const newWrappingKey = await ENC.deriveWrappingKey(newPin, newSaltB64);
+                const { ciphertext, nonce } = await ENC.encrypt(privateJwkStr, newWrappingKey);
+
+                const saveRes = await fetch('/api/keys/setup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        public_key: info.public_key,
+                        private_key_encrypted: ciphertext,
+                        private_key_nonce: nonce,
+                        salt: newSaltB64
+                    })
+                });
+                if (!saveRes.ok) throw new Error('Failed to save new PIN');
+
+                // Re-unlock immediately with the new PIN so the session stays usable
+                await unlockKeysWithPin(newPin);
+                document.getElementById('changePinModal').remove();
+                showToast('PIN Updated', 'Your PIN was changed. Your history is unaffected.', 'success');
+            } catch (e) {
+                console.error('Change PIN failed:', e);
+                alert('Could not change PIN - check that your current PIN is correct.');
             }
         }
 
@@ -840,13 +900,20 @@
             await loadContacts();
             await loadMessageRequests();
 
-            // Check if user has a PIN set
-            const hasPin = localStorage.getItem(pinStorageKey());
-            if (hasPin) {
-                showPinModal(false); // Ask for existing PIN
-            } else {
-                showPinModal(true);  // Ask to create PIN
+            // Check if this account already has keys set up on the server -
+            // this is what actually determines first-time vs returning, so
+            // it works correctly even on a brand new device/browser.
+            let hasKeys = false;
+            try {
+                const keyRes = await fetch('/api/keys/mine');
+                if (keyRes.ok) {
+                    const info = await keyRes.json();
+                    hasKeys = info.has_keys;
+                }
+            } catch (e) {
+                console.warn('Could not check key status:', e);
             }
+            showPinModal(!hasKeys);
 
             socket.on('new_message', async (data) => {
                 if (!pinVerified) return; // Don't process until PIN entered
@@ -1104,15 +1171,6 @@
             const contactEl = document.querySelector(`[data-contact-id="${contactId}"]`);
             if (contactEl) contactEl.classList.remove('unread');
 
-            // Ensure conversation key is ready
-            if (pinVerified) {
-                try {
-                    await deriveConversationKey(contactId);
-                } catch (e) {
-                    console.warn('Could not derive conversation key:', e);
-                }
-            }
-
             renderContacts();
             document.getElementById('chatHeader').style.display = 'flex';
             document.getElementById('chatInputArea').style.display = 'block';
@@ -1135,15 +1193,6 @@
 
         async function loadMessages(contactId) {
             try {
-                // Ensure key is derived before loading messages
-                if (pinVerified) {
-                    try {
-                        await deriveConversationKey(contactId);
-                    } catch (e) {
-                        console.warn('Key derivation failed:', e);
-                    }
-                }
-
                 const res = await fetch(`/api/messages/${contactId}`);
                 if (!res.ok) throw new Error('Failed to load messages');
                 const messages = await res.json();
@@ -1192,19 +1241,14 @@
             // Handle text content
             try {
                 if (data.encrypted_content && data.nonce) {
-                    const otherId = isSent ? data.receiver_id : data.sender_id;
-                    let key = null;
+                    // Whichever side of this message you are, use the copy
+                    // of the AES key that was wrapped for YOUR public key -
+                    // never the other person's copy.
+                    const wrappedKey = isSent ? data.encrypted_key_sender : data.encrypted_key_receiver;
 
-                    if (pinVerified && masterKey) {
-                        try {
-                            key = await deriveConversationKey(otherId);
-                        } catch (e) {
-                            console.warn('Failed to derive conversation key for', otherId, e);
-                        }
-                    }
-
-                    if (key) {
-                        content = await ENC.decrypt(data.encrypted_content, data.nonce, key);
+                    if (pinVerified && myPrivateKey && wrappedKey) {
+                        const msgKey = await ENC.unwrapKeyWithPrivateKey(wrappedKey, myPrivateKey);
+                        content = await ENC.decrypt(data.encrypted_content, data.nonce, msgKey);
                     } else {
                         content = '🔒 Enter your PIN to unlock this message';
                     }
@@ -1215,7 +1259,7 @@
                 }
             } catch (e) {
                 console.error('Decryption failed:', e);
-                content = '❌ Can\'t decrypt this - tap the 🔒 code badge above to check you and this contact used the same PIN';
+                content = '❌ Can\'t decrypt this message';
             }
 
             const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
@@ -1294,8 +1338,14 @@
             if (!currentContact) return;
             if (!text && !selectedFile) return;
 
-            if (!pinVerified || !masterKey) {
+            if (!pinVerified || !myPrivateKey) {
                 showError('Please enter your PIN first to unlock messaging');
+                return;
+            }
+
+            const recipientPublicKey = getContactPublicKeyJwk(currentContact.id);
+            if (!recipientPublicKey) {
+                showError('This contact hasn\'t set up their PIN yet - ask them to open ValuChat and set a PIN before you can message them securely.');
                 return;
             }
 
@@ -1312,8 +1362,16 @@
             }
 
             try {
-                const key = await deriveConversationKey(currentContact.id);
-                const encrypted = await ENC.encrypt(text, key);
+                // Fresh random key for this one message only.
+                const msgKey = await ENC.generateMessageKey();
+                const encrypted = await ENC.encrypt(text, msgKey);
+
+                // Wrap it for the recipient (so they can read it) and for
+                // ourselves (so we can still read our own sent messages
+                // later without needing the recipient's PIN or key at all).
+                const encryptedKeyReceiver = await ENC.wrapKeyWithPublicKey(msgKey, recipientPublicKey);
+                const encryptedKeySender = await ENC.wrapKeyWithPublicKey(msgKey, myPublicKeyJwk);
+
                 const tempId = 'temp-' + Date.now();
                 const optimisticMsg = {
                     id: tempId,
@@ -1321,6 +1379,8 @@
                     receiver_id: currentContact.id,
                     encrypted_content: encrypted.ciphertext,
                     nonce: encrypted.nonce,
+                    encrypted_key_sender: encryptedKeySender,
+                    encrypted_key_receiver: encryptedKeyReceiver,
                     timestamp: new Date().toISOString()
                 };
                 await displayMessage(optimisticMsg, true);
@@ -1329,7 +1389,9 @@
                     receiver_id: currentContact.id,
                     encrypted_content: encrypted.ciphertext,
                     nonce: encrypted.nonce,
-                    salt: 'pin-based-v3'
+                    salt: 'per-user-key-v4',
+                    encrypted_key_sender: encryptedKeySender,
+                    encrypted_key_receiver: encryptedKeyReceiver
                 };
 
                 if (socket.connected) {
@@ -1497,14 +1559,6 @@
                 if (res.ok) {
                     closeAddContact();
                     await loadContacts();
-                    // Derive key for new contact if PIN is ready
-                    if (pinVerified && masterKey) {
-                        try {
-                            await deriveConversationKey(contactId);
-                        } catch (e) {
-                            console.warn('Could not derive key for new contact:', e);
-                        }
-                    }
                     showToast('Contact Added', `${name} has been added to your contacts.`, 'success');
                 } else {
                     const data = await res.json();
