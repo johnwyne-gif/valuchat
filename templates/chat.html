@@ -100,7 +100,7 @@
         .chat-header-info p .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
         .chat-header-info p .status-dot.online { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
         .chat-header-info p .status-dot.offline { background: var(--text-dim); }
-        .encrypted-indicator { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--primary-light); background: rgba(168,85,247,0.08); padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); }
+        .encrypted-indicator { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--primary-light); background: rgba(168,85,247,0.08); padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); cursor: pointer; }
 
         .messages-container { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
         .messages-container::-webkit-scrollbar { width: 6px; }
@@ -225,8 +225,7 @@
             .chat-input-wrapper { gap: 8px; }
             .message { max-width: 85%; font-size: 14px; }
             .message-image { max-width: 200px; max-height: 160px; }
-            .encrypted-indicator { padding: 6px 8px; font-size: 0; } /* icon-only on small screens, tap for key check */
-            .encrypted-indicator::before { content: '🔒'; font-size: 16px; }
+            .encrypted-indicator { padding: 4px 8px; font-size: 10px; } /* shrink instead of hiding - it's how PIN mismatches get spotted on mobile */
             .contact-item { padding: 14px 10px; }
             .sidebar-header { padding: 16px; }
             .search-box { padding: 10px 12px; }
@@ -295,7 +294,7 @@
                     <h3 id="chatContactName">Select a contact</h3>
                     <p id="chatContactStatus"><span class="status-dot offline"></span> Offline</p>
                 </div>
-                <div class="encrypted-indicator" id="encryptedIndicator" onclick="showFingerprintModal()" style="cursor:pointer;" title="Tap to check your key code">🔒 End-to-End Encrypted</div>
+                <button class="encrypted-indicator" id="encryptedIndicator" onclick="showEncryptionInfo()" style="cursor:pointer;font:inherit;">🔒 <span id="encryptionCodeLabel">End-to-End Encrypted</span></button>
             </div>
 
             <div class="messages-container" id="messagesContainer">
@@ -400,6 +399,7 @@
         let masterKey = null;      // The AES key derived from PIN
         let masterKeyRaw = null;   // Raw bytes of master key for sub-key derivation
         let sharedKeys = {};       // Cache of conversation keys
+        let conversationCodes = {}; // Cache of short "safety codes" per contact, for PIN-match verification
         let pinVerified = false;
 
         // The PIN system relies on the Web Crypto API (crypto.subtle), which
@@ -417,17 +417,6 @@
             const key = await ENC.deriveKeyFromPassword(pin, fixedSalt);
             const rawBits = await ENC.deriveRawKey(pin, fixedSalt);
             return { key, raw: new Uint8Array(rawBits) };
-        }
-
-        // Safety-number style check: hash the raw master key and show a short
-        // human-comparable code. If two people who believe they typed the same
-        // PIN see different codes here, their PINs are NOT actually identical
-        // (typo, autocorrect, extra space, different digit count, etc).
-        // This never reveals the PIN itself - only a one-way fingerprint of it.
-        async function keyFingerprint(rawKeyBytes) {
-            const digest = await crypto.subtle.digest('SHA-256', rawKeyBytes);
-            const bytes = new Uint8Array(digest).slice(0, 3);
-            return Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('-');
         }
 
         // Derive a conversation-specific key from master key + contact IDs
@@ -450,6 +439,14 @@
             const saltFull = await crypto.subtle.sign('HMAC', hmacKey, convData);
             const salt = new Uint8Array(saltFull).slice(0, 16);
 
+            // Human-comparable "safety code" for this conversation. It's just a
+            // short hex slice of the same salt above, which only comes out the
+            // same on both devices if masterKeyRaw (i.e. the PIN) matches too.
+            // This lets two people confirm - by eye, out loud, however - that
+            // they're using the same PIN, *before* relying on message content.
+            const codeHex = Array.from(salt.slice(0, 2)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+            conversationCodes[contactId] = codeHex;
+
             // Derive conversation key: PBKDF2(masterKey as password, conversation salt)
             // We use the raw master key bits as the "password" for PBKDF2
             const keyMaterial = await crypto.subtle.importKey(
@@ -462,64 +459,6 @@
 
             sharedKeys[contactId] = convKey;
             return convKey;
-        }
-
-        // Update the header badge so the current fingerprint is always
-        // reachable via a tap, without needing to catch the toast in time.
-        function updateFingerprintBadge() {
-            const el = document.getElementById('encryptedIndicator');
-            if (el && window.valuchatKeyFingerprint) {
-                el.title = `Key code: ${window.valuchatKeyFingerprint} — tap to view`;
-            }
-        }
-
-        // Shows the key fingerprint in a dismissible modal so two people can
-        // read it out to each other (in person, by phone, etc) and confirm
-        // they derived the exact same key from their PIN. This is the direct
-        // way to catch a PIN typo/mismatch instead of guessing from decrypt
-        // errors on individual messages.
-        function showFingerprintModal() {
-            const existing = document.getElementById('fingerprintModal');
-            if (existing) { existing.remove(); return; }
-
-            const code = window.valuchatKeyFingerprint;
-            const modal = document.createElement('div');
-            modal.id = 'fingerprintModal';
-            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
-            modal.innerHTML = `
-                <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:32px;width:100%;max-width:360px;box-shadow:var(--glow);text-align:center;">
-                    <div style="font-size:40px;margin-bottom:12px;">🔑</div>
-                    <h2 style="font-size:20px;font-weight:800;margin-bottom:12px;">Your Key Code</h2>
-                    ${code ? `
-                        <div style="font-size:28px;font-weight:800;letter-spacing:2px;background:var(--bg-card);border:2px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">${escapeHtml(code)}</div>
-                        <p style="color:var(--text-muted);font-size:13px;line-height:1.5;">Ask the person you're chatting with to open this same screen. If your codes <b>match</b>, you both used the identical PIN and messages will decrypt correctly. If they <b>don't match</b>, one of you typed a different PIN — set a new matching PIN and try again.</p>
-                    ` : `<p style="color:var(--text-muted);font-size:14px;">Enter your PIN first to generate a key code.</p>`}
-                    <button onclick="document.getElementById('fingerprintModal').remove()" style="margin-top:20px;width:100%;padding:12px;background:var(--gradient);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;">Close</button>
-                </div>
-            `;
-            document.body.appendChild(modal);
-        }
-
-        // The header badge can get squeezed off-screen on narrow phones, so
-        // this floating button is the guaranteed-visible way to reach the
-        // key code on any screen size. It also auto-opens the modal once
-        // right after unlock so nobody has to go hunting for it.
-        let fingerprintAutoShown = false;
-        function ensureFingerprintFab() {
-            let fab = document.getElementById('keyCodeFab');
-            if (!fab) {
-                fab = document.createElement('button');
-                fab.id = 'keyCodeFab';
-                fab.title = 'Check your key code';
-                fab.textContent = '🔑';
-                fab.style.cssText = 'position:fixed;bottom:90px;right:16px;width:48px;height:48px;border-radius:50%;background:var(--gradient);color:#fff;border:none;font-size:20px;box-shadow:0 4px 16px rgba(168,85,247,0.4);z-index:2000;cursor:pointer;';
-                fab.onclick = showFingerprintModal;
-                document.body.appendChild(fab);
-            }
-            if (!fingerprintAutoShown) {
-                fingerprintAutoShown = true;
-                showFingerprintModal();
-            }
         }
 
         // ============================================
@@ -706,12 +645,6 @@
                 masterKeyRaw = result.raw;
                 pinVerified = true;
 
-                // Safety-number check: compute a short code from this PIN so
-                // it can be visually compared with the other person's code.
-                window.valuchatKeyFingerprint = await keyFingerprint(masterKeyRaw);
-                updateFingerprintBadge();
-                ensureFingerprintFab();
-
                 // Remove modal
                 const modal = document.getElementById('pinModal');
                 if (modal) modal.remove();
@@ -722,6 +655,7 @@
 
                 // If a contact is selected, reload their messages
                 if (currentContact) {
+                    updateEncryptionBadge(currentContact.id);
                     await loadMessages(currentContact.id);
                 } else {
                     // Restore the conversation the user was last viewing before reload
@@ -731,11 +665,69 @@
                     }
                 }
 
-                showToast('Messages Unlocked', `Your chat history has been restored. Key check: ${window.valuchatKeyFingerprint} — ask your contact if their code matches.`, 'success');
+                showToast('Messages Unlocked', 'Your chat history has been restored.', 'success');
             } catch (e) {
                 console.error('Failed to derive master key:', e);
                 alert('Failed to unlock messages. Please try again.');
             }
+        }
+
+        function updateEncryptionBadge(contactId) {
+            const label = document.getElementById('encryptionCodeLabel');
+            if (!label) return;
+            const code = conversationCodes[contactId];
+            label.textContent = code ? `Code: ${code}` : 'End-to-End Encrypted';
+        }
+
+        // Explains the safety code and gives a one-tap way to reset a
+        // mismatched PIN. This is the main debugging tool for "both PINs
+        // were entered correctly but messages still won't decrypt" - that
+        // almost always means the two people typed *different* PINs, since
+        // ValuChat's encryption key is a shared secret between them, not a
+        // private per-account key.
+        function showEncryptionInfo() {
+            const code = currentContact ? conversationCodes[currentContact.id] : null;
+            const existing = document.getElementById('encInfoModal');
+            if (existing) existing.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'encInfoModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
+            modal.innerHTML = `
+                <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:32px;width:100%;max-width:380px;box-shadow:var(--glow);text-align:center;">
+                    <div style="font-size:40px;margin-bottom:12px;">🔐</div>
+                    <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;">Safety Code${code ? `: ${code}` : ''}</h2>
+                    <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px;line-height:1.6;">
+                        ${code
+                            ? `This code is generated from your PIN. Ask the other person to open this same screen for your conversation.<br><br><b>If their code also shows ${code}, you're both using the same PIN</b> and messages will decrypt fine.<br><br>If their code is different, one of you set a different PIN - use "Change my PIN" below and agree on the same one.`
+                            : 'Select a contact first to see this conversation\'s safety code.'}
+                    </p>
+                    <button onclick="resetPin()" style="width:100%;padding:14px;background:var(--gradient);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;">Change My PIN</button>
+                    <button onclick="document.getElementById('encInfoModal').remove()" style="width:100%;padding:12px;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;">Close</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Clears this account's locally-stored PIN so the "set PIN" modal
+        // reappears, letting the user pick a new PIN that actually matches
+        // their contact's - without needing to log out or clear the browser.
+        function resetPin() {
+            const sure = confirm('This resets your local PIN. You\'ll set a new one immediately - make sure you and the other person agree on the same PIN. Continue?');
+            if (!sure) return;
+
+            const existingModal = document.getElementById('encInfoModal');
+            if (existingModal) existingModal.remove();
+
+            localStorage.removeItem(pinStorageKey());
+            masterKey = null;
+            masterKeyRaw = null;
+            pinVerified = false;
+            sharedKeys = {};
+            conversationCodes = {};
+            updateEncryptionBadge(currentContact ? currentContact.id : null);
+
+            showPinModal(true);
         }
 
         async function hashPin(pin) {
@@ -1127,6 +1119,7 @@
             document.getElementById('chatAvatar').textContent = escapeHtml((currentContact.display_name || currentContact.username).charAt(0).toUpperCase());
             document.getElementById('chatContactName').textContent = escapeHtml(currentContact.display_name || currentContact.username);
             updateChatHeaderStatus();
+            updateEncryptionBadge(contactId);
             await loadMessages(contactId);
         }
 
@@ -1222,7 +1215,7 @@
                 }
             } catch (e) {
                 console.error('Decryption failed:', e);
-                content = '❌ Unable to decrypt - wrong PIN or corrupted message';
+                content = '❌ Can\'t decrypt this - tap the 🔒 code badge above to check you and this contact used the same PIN';
             }
 
             const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
