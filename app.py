@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import sqlite3
 import os
+import re
 import base64
 import secrets
 import json
@@ -107,6 +108,11 @@ csrf.exempt('app.manage_blocked_users')
 csrf.exempt('app.upload_file')
 csrf.exempt('app.upload_chat_file')
 csrf.exempt('app.upload_message_file')
+csrf.exempt('app.update_profile')
+csrf.exempt('app.update_avatar')
+csrf.exempt('app.change_email')
+csrf.exempt('app.change_password')
+csrf.exempt('app.delete_contact')
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {
@@ -515,6 +521,156 @@ def get_user():
         })
     return jsonify({'error': 'User not found'}), 404
 
+@app.route('/api/profile', methods=['POST'])
+def update_profile():
+    """Update the current user's display name and username (Profile tab)."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip().lower()
+    display_name = (data.get('display_name') or '').strip()
+
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+    if len(username) < 3 or len(username) > 32:
+        return jsonify({'error': 'Username must be between 3 and 32 characters'}), 400
+    if not re.match(r'^[a-z0-9_.]+$', username):
+        return jsonify({'error': 'Username can only contain lowercase letters, numbers, underscores and dots'}), 400
+    if not display_name:
+        display_name = username
+    if len(display_name) > 50:
+        return jsonify({'error': 'Display name is too long'}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE users SET username = ?, display_name = ? WHERE id = ?
+        """, (username, display_name, session['user_id']))
+        conn.commit()
+        session['username'] = username
+        return jsonify({'success': True, 'username': username, 'display_name': display_name})
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'That username is already taken'}), 400
+    finally:
+        conn.close()
+
+
+@app.route('/api/profile/avatar', methods=['POST'])
+def update_avatar():
+    """Upload/replace the current user's profile picture."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if 'avatar' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['avatar']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+    if ext not in ALLOWED_EXTENSIONS['image']:
+        return jsonify({'error': 'Only image files are allowed (png, jpg, jpeg, gif, webp, bmp, svg)'}), 400
+
+    avatar_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'avatars')
+    os.makedirs(avatar_folder, exist_ok=True)
+    unique_name = f"{uuid.uuid4().hex}.{ext}"
+    file_path = os.path.join(avatar_folder, unique_name)
+    file.save(file_path)
+
+    avatar_url = f"/static/uploads/avatars/{unique_name}"
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT avatar_url FROM users WHERE id = ?", (session['user_id'],))
+    old = cursor.fetchone()
+    cursor.execute("UPDATE users SET avatar_url = ? WHERE id = ?", (avatar_url, session['user_id']))
+    conn.commit()
+    conn.close()
+
+    # Best-effort cleanup of the previous uploaded avatar file
+    if old and old['avatar_url'] and old['avatar_url'].startswith('/static/uploads/avatars/'):
+        old_path = os.path.join(avatar_folder, os.path.basename(old['avatar_url']))
+        if os.path.isfile(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+    return jsonify({'success': True, 'avatar_url': avatar_url})
+
+
+@app.route('/api/account/email', methods=['POST'])
+def change_email():
+    """Change the current user's email address (Account Settings tab)."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password', '')
+    new_email = (data.get('new_email') or '').strip().lower()
+
+    if not new_email or '@' not in new_email or '.' not in new_email.split('@')[-1]:
+        return jsonify({'error': 'Please enter a valid email address'}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (session['user_id'],))
+    user = cursor.fetchone()
+    if not user or not check_password_hash(user['password_hash'], current_password):
+        conn.close()
+        return jsonify({'error': 'Current password is incorrect'}), 400
+
+    try:
+        cursor.execute("UPDATE users SET email = ? WHERE id = ?", (new_email, session['user_id']))
+        conn.commit()
+        return jsonify({'success': True, 'email': new_email})
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'That email is already in use'}), 400
+    finally:
+        conn.close()
+
+
+@app.route('/api/account/password', methods=['POST'])
+def change_password():
+    """Change the current user's login password (Account Settings tab)."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    current_password = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM users WHERE id = ?", (session['user_id'],))
+    user = cursor.fetchone()
+    if not user or not check_password_hash(user['password_hash'], current_password):
+        conn.close()
+        return jsonify({'error': 'Current password is incorrect'}), 400
+
+    if len(new_password) < 8:
+        conn.close()
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+    if not any(c.isupper() for c in new_password):
+        conn.close()
+        return jsonify({'error': 'Password must contain at least one uppercase letter'}), 400
+    if not any(c.islower() for c in new_password):
+        conn.close()
+        return jsonify({'error': 'Password must contain at least one lowercase letter'}), 400
+    if not any(c.isdigit() for c in new_password):
+        conn.close()
+        return jsonify({'error': 'Password must contain at least one digit'}), 400
+
+    new_hash = generate_password_hash(new_password)
+    cursor.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, session['user_id']))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
 @app.route('/api/keys/setup', methods=['POST'])
 def setup_keys():
     """
@@ -664,6 +820,25 @@ def add_contact():
         return jsonify({'error': 'Contact already exists'}), 400
     finally:
         conn.close()
+
+@app.route('/api/contacts/<int:contact_id>', methods=['DELETE'])
+def delete_contact(contact_id):
+    """Remove a contact and permanently delete the message history with them."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    user_id = session['user_id']
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM contacts WHERE user_id = ? AND contact_id = ?", (user_id, contact_id))
+    cursor.execute("""
+        DELETE FROM messages
+        WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+    """, (user_id, contact_id, contact_id, user_id))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True})
 
 @app.route('/api/messages/<int:contact_id>')
 def get_messages(contact_id):
@@ -825,6 +1000,15 @@ def handle_send_message(data):
     if cursor.fetchone():
         conn.close()
         emit('error', {'message': 'You have been blocked by this user'})
+        return
+
+    cursor.execute("""
+        SELECT id FROM blocked_users
+        WHERE user_id = ? AND blocked_id = ?
+    """, (session['user_id'], receiver_id))
+    if cursor.fetchone():
+        conn.close()
+        emit('error', {'message': 'You have blocked this user. Unblock them to send a message.'})
         return
 
     cursor.execute("""

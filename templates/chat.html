@@ -36,10 +36,37 @@
         .sidebar { width: 320px; background: var(--bg-elevated); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
         .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
         .user-info { display: flex; align-items: center; gap: 12px; }
-        .user-avatar { width: 44px; height: 44px; background: var(--gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; box-shadow: 0 0 15px rgba(168,85,247,0.3); }
-        .user-details h3 { font-size: 15px; font-weight: 700; }
+        .user-avatar { width: 44px; height: 44px; background: var(--gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #fff; box-shadow: 0 0 15px rgba(168,85,247,0.3); overflow: hidden; flex-shrink: 0; }
+        .user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+        .user-details { min-width: 0; overflow: hidden; }
+        .user-details h3 { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .user-details span { font-size: 12px; color: var(--primary-light); display: flex; align-items: center; gap: 4px; }
         .user-details span::before { content: ''; width: 6px; height: 6px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 8px rgba(168,85,247,0.5); }
+
+        /* User 3-dot menu */
+        .user-menu-wrap { margin-left: auto; position: relative; flex-shrink: 0; }
+        .user-menu-btn { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: all 0.2s; line-height: 1; }
+        .user-menu-btn:hover { background: var(--bg-hover); color: var(--text); }
+        .user-menu-dropdown { position: absolute; top: calc(100% + 8px); right: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; min-width: 210px; box-shadow: var(--shadow); padding: 6px; display: none; flex-direction: column; z-index: 200; }
+        .user-menu-dropdown.active { display: flex; }
+        .user-menu-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; text-decoration: none; transition: all 0.2s; background: none; border: none; text-align: left; width: 100%; font-family: inherit; }
+        .user-menu-item:hover { background: var(--bg-hover); }
+        .user-menu-divider { height: 1px; background: var(--border); margin: 4px 2px; }
+        .user-menu-logout { color: #f87171; }
+
+        /* Right-click context menu (contacts) */
+        .context-menu { position: fixed; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 6px; min-width: 170px; box-shadow: var(--shadow); z-index: 3000; }
+        .context-menu-item { padding: 10px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; transition: all 0.2s; }
+        .context-menu-item:hover { background: var(--bg-hover); }
+        .context-menu-danger { color: #f87171; }
+
+        /* Settings modal tabs */
+        .settings-tab-btn { flex: 1; padding: 10px; border: none; border-radius: 9px; font-size: 13px; font-weight: 700; cursor: pointer; background: transparent; color: var(--text-muted); transition: all 0.2s; font-family: inherit; }
+        .settings-tab-btn.active { background: var(--gradient); color: #fff; }
+        .settings-input { width: 100%; padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; margin-bottom: 10px; font-family: 'Inter', sans-serif; }
+        .settings-input:focus { outline: none; border-color: var(--primary); }
+        .settings-btn { width: 100%; padding: 12px; background: var(--gradient); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .settings-section-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
 
         .search-box { padding: 12px 16px; }
         .search-box input { width: 100%; padding: 10px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-family: 'Inter', sans-serif; transition: all 0.3s; }
@@ -262,6 +289,16 @@
                         <h3 id="userDisplayName">Loading...</h3>
                         <span>Online</span>
                     </div>
+                    <div class="user-menu-wrap">
+                        <button class="user-menu-btn" id="userMenuBtn" onclick="toggleUserMenu(event)" title="Menu">⋮</button>
+                        <div class="user-menu-dropdown" id="userMenuDropdown">
+                            <button class="user-menu-item" onclick="openSettingsModal('account')">⚙️ Account Settings</button>
+                            <button class="user-menu-item" onclick="openSettingsModal('profile')">👤 Profile</button>
+                            <button class="user-menu-item" onclick="openBlockedUsersModal()">🚫 Blocked Users</button>
+                            <div class="user-menu-divider"></div>
+                            <a class="user-menu-item user-menu-logout" href="/logout">🚪 Logout</a>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -280,10 +317,6 @@
             <div class="contacts-list" id="requestsList" style="display:none;"></div>
 
             <div class="add-contact-btn" id="addContactBtn" onclick="openAddContact()">+ Add New Contact</div>
-
-            <div class="sidebar-footer">
-                <a href="/logout">🚪 Logout</a>
-            </div>
         </div>
 
         <div class="chat-area">
@@ -810,6 +843,346 @@
         }
 
         // ============================================
+        // USER 3-DOT MENU
+        // ============================================
+        function toggleUserMenu(e) {
+            e.stopPropagation();
+            document.getElementById('userMenuDropdown').classList.toggle('active');
+        }
+        function closeUserMenu() {
+            document.getElementById('userMenuDropdown')?.classList.remove('active');
+        }
+        document.addEventListener('click', () => closeUserMenu());
+
+        // ============================================
+        // SETTINGS MODAL (Account Settings + Profile)
+        // ============================================
+        function openSettingsModal(initialTab) {
+            closeUserMenu();
+            document.getElementById('settingsModal')?.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'settingsModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
+            modal.innerHTML = `
+                <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:32px;width:100%;max-width:440px;max-height:85vh;overflow-y:auto;box-shadow:var(--glow);">
+                    <button onclick="document.getElementById('settingsModal').remove()" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:none;background:var(--bg-card);color:var(--text-muted);font-size:16px;cursor:pointer;">✕</button>
+                    <h2 style="font-size:20px;font-weight:800;margin-bottom:20px;">Settings</h2>
+                    <div style="display:flex;gap:8px;margin-bottom:24px;background:var(--bg-card);padding:4px;border-radius:12px;">
+                        <button id="settingsTabAccountBtn" class="settings-tab-btn" onclick="switchSettingsTab('account')">Account Settings</button>
+                        <button id="settingsTabProfileBtn" class="settings-tab-btn" onclick="switchSettingsTab('profile')">Profile</button>
+                    </div>
+
+                    <div id="settingsTabAccount">
+                        <div class="settings-section-title">Change Email</div>
+                        <input type="email" id="newEmailInput" class="settings-input" placeholder="New email address" value="${escapeHtml(currentUser?.email || '')}">
+                        <input type="password" id="emailCurrentPasswordInput" class="settings-input" placeholder="Current password" style="margin-bottom:14px;">
+                        <button class="settings-btn" onclick="submitChangeEmail()" style="margin-bottom:28px;">Update Email</button>
+
+                        <div class="settings-section-title">Change Password</div>
+                        <input type="password" id="currentPasswordInput" class="settings-input" placeholder="Current password">
+                        <input type="password" id="newPasswordInput" class="settings-input" placeholder="New password">
+                        <input type="password" id="confirmNewPasswordInput" class="settings-input" placeholder="Confirm new password" style="margin-bottom:14px;">
+                        <button class="settings-btn" onclick="submitChangePassword()">Update Password</button>
+                    </div>
+
+                    <div id="settingsTabProfile" style="display:none;">
+                        <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:22px;">
+                            <div id="profileAvatarPreview" class="user-avatar" style="width:84px;height:84px;font-size:30px;margin-bottom:12px;"></div>
+                            <input type="file" id="avatarFileInput" accept="image/*" style="display:none;" onchange="handleAvatarSelect(event)">
+                            <button onclick="document.getElementById('avatarFileInput').click()" style="padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted);">📷 Change Picture</button>
+                        </div>
+                        <div class="settings-section-title">Display Name</div>
+                        <input type="text" id="profileDisplayNameInput" class="settings-input" placeholder="Display name" value="${escapeHtml(currentUser?.display_name || '')}">
+                        <div class="settings-section-title">Username</div>
+                        <input type="text" id="profileUsernameInput" class="settings-input" placeholder="Username" value="${escapeHtml(currentUser?.username || '')}" style="margin-bottom:20px;">
+                        <button class="settings-btn" onclick="submitProfileUpdate()">Save Profile</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            updateProfileAvatarPreview();
+            switchSettingsTab(initialTab || 'account');
+        }
+
+        function switchSettingsTab(tab) {
+            const isAccount = tab === 'account';
+            document.getElementById('settingsTabAccount').style.display = isAccount ? 'block' : 'none';
+            document.getElementById('settingsTabProfile').style.display = isAccount ? 'none' : 'block';
+            document.getElementById('settingsTabAccountBtn').classList.toggle('active', isAccount);
+            document.getElementById('settingsTabProfileBtn').classList.toggle('active', !isAccount);
+        }
+
+        function updateProfileAvatarPreview() {
+            const el = document.getElementById('profileAvatarPreview');
+            if (!el || !currentUser) return;
+            if (currentUser.avatar_url && currentUser.avatar_url !== 'default') {
+                el.innerHTML = `<img src="${escapeHtml(currentUser.avatar_url)}" alt="Avatar">`;
+            } else {
+                el.textContent = (currentUser.display_name || currentUser.username || '?').charAt(0).toUpperCase();
+            }
+        }
+
+        function handleAvatarSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (!file.type.startsWith('image/')) { showToast('Invalid file', 'Please select an image file.', 'warning'); return; }
+            if (file.size > 5 * 1024 * 1024) { showToast('File too large', 'Please pick an image under 5MB.', 'warning'); return; }
+
+            selectedAvatarFile = file;
+            const reader = new FileReader();
+            reader.onload = e => {
+                const el = document.getElementById('profileAvatarPreview');
+                if (el) el.innerHTML = `<img src="${e.target.result}" alt="Avatar">`;
+            };
+            reader.readAsDataURL(file);
+            uploadAvatar();
+        }
+
+        async function uploadAvatar() {
+            if (!selectedAvatarFile) return;
+            const formData = new FormData();
+            formData.append('avatar', selectedAvatarFile);
+            try {
+                const res = await fetch('/api/profile/avatar', { method: 'POST', body: formData });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.error || 'Upload failed');
+                currentUser.avatar_url = result.avatar_url;
+                selectedAvatarFile = null;
+                applyUserAvatar();
+                updateProfileAvatarPreview();
+                showToast('Picture updated', 'Your profile picture was changed.', 'success');
+            } catch (e) {
+                console.error('Avatar upload failed:', e);
+                showToast('Error', e.message || 'Could not update picture.', 'warning');
+            }
+        }
+
+        async function submitProfileUpdate() {
+            const displayName = document.getElementById('profileDisplayNameInput').value.trim();
+            const username = document.getElementById('profileUsernameInput').value.trim();
+            if (!username) { showToast('Error', 'Username is required.', 'warning'); return; }
+            try {
+                const res = await fetch('/api/profile', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ display_name: displayName, username })
+                });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.error || 'Update failed');
+                currentUser.display_name = result.display_name;
+                currentUser.username = result.username;
+                document.getElementById('userDisplayName').textContent = escapeHtml(currentUser.display_name || currentUser.username);
+                applyUserAvatar();
+                showToast('Profile updated', 'Your profile was saved.', 'success');
+            } catch (e) {
+                console.error('Profile update failed:', e);
+                showToast('Error', e.message || 'Could not update profile.', 'warning');
+            }
+        }
+
+        async function submitChangeEmail() {
+            const newEmail = document.getElementById('newEmailInput').value.trim();
+            const currentPassword = document.getElementById('emailCurrentPasswordInput').value;
+            if (!newEmail || !currentPassword) { showToast('Error', 'Fill in both fields.', 'warning'); return; }
+            try {
+                const res = await fetch('/api/account/email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_email: newEmail, current_password: currentPassword })
+                });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.error || 'Update failed');
+                currentUser.email = result.email;
+                document.getElementById('emailCurrentPasswordInput').value = '';
+                showToast('Email updated', 'Your email address was changed.', 'success');
+            } catch (e) {
+                console.error('Email update failed:', e);
+                showToast('Error', e.message || 'Could not update email.', 'warning');
+            }
+        }
+
+        async function submitChangePassword() {
+            const currentPassword = document.getElementById('currentPasswordInput').value;
+            const newPassword = document.getElementById('newPasswordInput').value;
+            const confirmPassword = document.getElementById('confirmNewPasswordInput').value;
+            if (!currentPassword || !newPassword) { showToast('Error', 'Fill in all fields.', 'warning'); return; }
+            if (newPassword !== confirmPassword) { showToast('Error', 'New passwords do not match.', 'warning'); return; }
+            try {
+                const res = await fetch('/api/account/password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+                });
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.error || 'Update failed');
+                document.getElementById('currentPasswordInput').value = '';
+                document.getElementById('newPasswordInput').value = '';
+                document.getElementById('confirmNewPasswordInput').value = '';
+                showToast('Password updated', 'Your password was changed.', 'success');
+            } catch (e) {
+                console.error('Password update failed:', e);
+                showToast('Error', e.message || 'Could not update password.', 'warning');
+            }
+        }
+
+        // ============================================
+        // BLOCKED USERS MODAL
+        // ============================================
+        function openBlockedUsersModal() {
+            closeUserMenu();
+            document.getElementById('blockedUsersModal')?.remove();
+
+            const modal = document.createElement('div');
+            modal.id = 'blockedUsersModal';
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:5000;backdrop-filter:blur(10px);';
+            modal.innerHTML = `
+                <div style="position:relative;background:var(--bg-elevated);border:1px solid var(--border);border-radius:24px;padding:32px;width:100%;max-width:420px;max-height:80vh;overflow-y:auto;box-shadow:var(--glow);">
+                    <button onclick="document.getElementById('blockedUsersModal').remove()" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;border:none;background:var(--bg-card);color:var(--text-muted);font-size:16px;cursor:pointer;">✕</button>
+                    <h2 style="font-size:20px;font-weight:800;margin-bottom:4px;">🚫 Blocked Users</h2>
+                    <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px;">Blocked users can't message you, and you won't see them in your chat list.</p>
+                    <div id="blockedUsersList"></div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            renderBlockedUsersList();
+            loadBlockedUsersDetailed();
+        }
+
+        function renderBlockedUsersList() {
+            const container = document.getElementById('blockedUsersList');
+            if (!container) return;
+            if (blockedUsersData.length === 0) {
+                container.innerHTML = '<div style="text-align:center;padding:30px 10px;color:var(--text-dim);font-size:13px;">No blocked users.</div>';
+                return;
+            }
+            container.innerHTML = blockedUsersData.map(u => `
+                <div style="display:flex;align-items:center;gap:12px;padding:10px;border-radius:12px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);">
+                    <div class="contact-avatar" style="width:38px;height:38px;font-size:14px;">${escapeHtml((u.display_name || u.username).charAt(0).toUpperCase())}</div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(u.display_name || u.username)}</div>
+                        <div style="font-size:12px;color:var(--text-dim);">@${escapeHtml(u.username)}</div>
+                    </div>
+                    <button onclick="unblockFromModal(${u.id})" style="padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:none;background:var(--gradient);color:#fff;">Unblock</button>
+                </div>
+            `).join('');
+        }
+
+        async function unblockFromModal(userId) {
+            try {
+                const res = await fetch('/api/blocked-users', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ blocked_id: userId })
+                });
+                if (!res.ok) throw new Error('Failed to unblock');
+                blockedUsersData = blockedUsersData.filter(u => u.id != userId);
+                blockedUserIds.delete(userId);
+                renderBlockedUsersList();
+                renderContacts();
+                showToast('User unblocked', 'They can message you again.', 'success');
+            } catch (e) {
+                console.error('Unblock failed:', e);
+                showToast('Error', 'Could not unblock user.', 'warning');
+            }
+        }
+
+        // ============================================
+        // CONTACT RIGHT-CLICK CONTEXT MENU (Block / Delete)
+        // ============================================
+        function showContactContextMenu(event, contactId) {
+            event.preventDefault();
+            closeContactContextMenu();
+
+            const contact = contacts.find(c => c.id == contactId);
+            if (!contact) return;
+            const isBlocked = blockedUserIds.has(contactId);
+
+            const menu = document.createElement('div');
+            menu.id = 'contactContextMenu';
+            menu.className = 'context-menu';
+            const menuWidth = 180, menuHeight = 100;
+            const left = Math.min(event.pageX, window.innerWidth - menuWidth - 8);
+            const top = Math.min(event.pageY, window.innerHeight - menuHeight - 8);
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+            menu.innerHTML = `
+                <div class="context-menu-item" onclick="contextBlockContact(${contactId})">${isBlocked ? '✅ Unblock' : '🚫 Block'}</div>
+                <div class="context-menu-item context-menu-danger" onclick="contextDeleteContact(${contactId})">🗑️ Delete</div>
+            `;
+            document.body.appendChild(menu);
+            setTimeout(() => document.addEventListener('click', closeContactContextMenu, { once: true }), 0);
+        }
+
+        function closeContactContextMenu() {
+            document.getElementById('contactContextMenu')?.remove();
+        }
+
+        async function contextDeleteContact(contactId) {
+            closeContactContextMenu();
+            const contact = contacts.find(c => c.id == contactId);
+            if (!contact) return;
+            if (!confirm(`Delete ${contact.display_name || contact.username}? This will permanently delete your message history with them.`)) return;
+
+            try {
+                const res = await fetch(`/api/contacts/${contactId}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed to delete contact');
+                contacts = contacts.filter(c => c.id != contactId);
+                if (currentContact && currentContact.id == contactId) {
+                    currentContact = null;
+                    document.getElementById('chatHeader').style.display = 'none';
+                    document.getElementById('chatInputArea').style.display = 'none';
+                    document.getElementById('messagesContainer').innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">💬</div>
+                            <h3>Welcome to ValuChat</h3>
+                            <p>Select a contact to start a secure conversation</p>
+                        </div>`;
+                    document.body.classList.remove('chat-view-active');
+                }
+                renderContacts();
+                showToast('Contact deleted', 'Contact and message history removed.', 'success');
+            } catch (e) {
+                console.error('Delete contact failed:', e);
+                showToast('Error', 'Could not delete contact.', 'warning');
+            }
+        }
+
+        async function contextBlockContact(contactId) {
+            closeContactContextMenu();
+            const isBlocked = blockedUserIds.has(contactId);
+            try {
+                const res = await fetch('/api/blocked-users', {
+                    method: isBlocked ? 'DELETE' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ blocked_id: contactId })
+                });
+                if (!res.ok) throw new Error('Request failed');
+
+                if (isBlocked) {
+                    blockedUserIds.delete(contactId);
+                    blockedUsersData = blockedUsersData.filter(u => u.id != contactId);
+                } else {
+                    blockedUserIds.add(contactId);
+                    const c = contacts.find(x => x.id == contactId);
+                    if (c) blockedUsersData.push({ id: c.id, username: c.username, display_name: c.display_name });
+                    if (currentContact && currentContact.id == contactId) {
+                        currentContact = null;
+                        document.getElementById('chatHeader').style.display = 'none';
+                        document.getElementById('chatInputArea').style.display = 'none';
+                        document.body.classList.remove('chat-view-active');
+                    }
+                }
+                renderContacts();
+                renderBlockedUsersList();
+                showToast(isBlocked ? 'User unblocked' : 'User blocked', isBlocked ? 'They can message you again.' : 'They can no longer message you.', 'success');
+            } catch (e) {
+                console.error('Block/unblock failed:', e);
+                showToast('Error', 'Could not update block status.', 'warning');
+            }
+        }
+
+        // ============================================
         // CSRF Token for AJAX requests
         // ============================================
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -840,6 +1213,9 @@
         let currentContact = null;
         let contacts = [];
         let messageRequests = [];
+        let blockedUserIds = new Set();
+        let blockedUsersData = [];
+        let selectedAvatarFile = null;
         let typingTimeout;
         let currentTab = 'chats';
         let pendingMessages = [];
@@ -897,6 +1273,7 @@
         // ============================================
         document.addEventListener('DOMContentLoaded', async () => {
             await loadUser();
+            await loadBlockedUsersDetailed();
             await loadContacts();
             await loadMessageRequests();
 
@@ -970,10 +1347,32 @@
                 if (!res.ok) throw new Error('Unauthorized');
                 currentUser = await res.json();
                 document.getElementById('userDisplayName').textContent = escapeHtml(currentUser.display_name || currentUser.username);
-                document.getElementById('userAvatar').textContent = (currentUser.display_name || currentUser.username).charAt(0).toUpperCase();
+                applyUserAvatar();
             } catch (e) {
                 console.error('Failed to load user:', e);
                 window.location.href = '/login';
+            }
+        }
+
+        function applyUserAvatar() {
+            const el = document.getElementById('userAvatar');
+            if (!el || !currentUser) return;
+            if (currentUser.avatar_url && currentUser.avatar_url !== 'default') {
+                el.innerHTML = `<img src="${escapeHtml(currentUser.avatar_url)}" alt="Avatar">`;
+            } else {
+                el.textContent = (currentUser.display_name || currentUser.username).charAt(0).toUpperCase();
+            }
+        }
+
+        async function loadBlockedUsersDetailed() {
+            try {
+                const res = await fetch('/api/blocked-users');
+                if (!res.ok) throw new Error('Failed to load blocked users');
+                blockedUsersData = await res.json();
+                blockedUserIds = new Set(blockedUsersData.map(u => u.id));
+                renderBlockedUsersList();
+            } catch (e) {
+                console.error('Failed to load blocked users:', e);
             }
         }
 
@@ -1037,17 +1436,21 @@
 
         function renderContacts() {
             const container = document.getElementById('contactsList');
-            if (contacts.length === 0) {
-                container.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 13px;">No contacts yet.<br>Click "Add New Contact" to get started.</div>';
+            const visibleContacts = contacts.filter(c => !blockedUserIds.has(c.id));
+
+            if (visibleContacts.length === 0) {
+                container.innerHTML = contacts.length === 0
+                    ? '<div style="text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 13px;">No contacts yet.<br>Click "Add New Contact" to get started.</div>'
+                    : '<div style="text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 13px;">All your contacts are blocked.<br>Unblock them from the menu to see them here.</div>';
                 return;
             }
 
-            container.innerHTML = contacts.map(c => {
+            container.innerHTML = visibleContacts.map(c => {
                 const statusClass = c.status === 'online' ? 'status-online' : 'status-offline';
                 const statusText = c.status === 'online' ? 'Online' : formatLastSeen(c.last_seen);
                 return `
                 <div class="contact-item ${currentContact && currentContact.id == c.id ? 'active' : ''}" 
-                     data-contact-id="${c.id}" onclick="selectContact(${c.id})">
+                     data-contact-id="${c.id}" onclick="selectContact(${c.id})" oncontextmenu="showContactContextMenu(event, ${c.id})">
                     <div class="contact-avatar">${escapeHtml((c.display_name || c.username).charAt(0).toUpperCase())}</div>
                     <div class="contact-info">
                         <h4>${escapeHtml(c.display_name || c.username)}</h4>
